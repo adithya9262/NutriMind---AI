@@ -1,0 +1,90 @@
+# NutriMind AI — Full-Stack Docker Infrastructure
+#
+# Usage:
+#   docker compose up -d
+#   docker compose down
+#   docker compose logs -f
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nutrimind-postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${DOCKER_POSTGRES_PORT:-5433}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nutrimind}
+      POSTGRES_USER: ${POSTGRES_USER:-nutrimind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nutrimind_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nutrimind} -d ${POSTGRES_DB:-nutrimind}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - nutrimind_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nutrimind-backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      APP_ENV: development
+      DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nutrimind}:${POSTGRES_PASSWORD:-nutrimind_dev}@postgres:5432/${POSTGRES_DB:-nutrimind}
+      CORS_ORIGINS: http://localhost:3000
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: HS256
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+      JWT_ISSUER: nutrimind-ai
+      JWT_AUDIENCE: nutrimind-ai-api
+      REFRESH_TOKEN_SECRET_KEY: ${REFRESH_TOKEN_SECRET_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - nutrimind_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nutrimind-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - nutrimind_network
+
+volumes:
+  postgres_data:
+    name: nutrimind_postgres_data
+
+networks:
+  nutrimind_network:
+    name: nutrimind_network
+    driver: bridge

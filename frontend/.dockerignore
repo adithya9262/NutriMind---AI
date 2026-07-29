@@ -1,0 +1,16 @@
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+node_modules/
+.next/
+__tests__/
+coverage/
+*.tsbuildinfo
+.git/
+.gitignore
+README.md
+vitest.config.ts
+vitest.setup.ts
+Phase_6A-2_Report.md

@@ -1,0 +1,136 @@
+# =============================================================================
+# NutriMind AI — Root .gitignore
+# =============================================================================
+# Do not add negated patterns that would override the ignores below unless
+# the intent is to keep a specific file inside an otherwise-ignored tree.
+
+# -------------------------------------
+# Secrets and local environment files
+# -------------------------------------
+.env
+.env.*
+!.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+frontend/.env
+frontend/.env.local
+backend/.env
+*.pem
+*.key
+secrets/
+credentials/
+
+# Keep example env files trackable
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+
+# -------------------------------------
+# Node.js and Next.js
+# -------------------------------------
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+out/
+frontend/out/
+coverage/
+frontend/coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# -------------------------------------
+# Python
+# -------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+*.egg-info/
+.eggs/
+
+# -------------------------------------
+# Python virtual environments
+# -------------------------------------
+.venv/
+venv/
+env/
+ENV/
+backend/.venv/
+
+# -------------------------------------
+# Build output
+# -------------------------------------
+dist/
+build/
+backend/dist/
+backend/build/
+
+# -------------------------------------
+# Local databases and runtime data
+# -------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+postgres-data/
+pgdata/
+data/
+local-data/
+uploads/
+temp/
+tmp/
+
+# -------------------------------------
+# Logs
+# -------------------------------------
+*.log
+logs/
+backend/logs/
+
+# -------------------------------------
+# IDE files
+# -------------------------------------
+.vscode/
+.idea/
+*.code-workspace
+
+# -------------------------------------
+# Operating-system files
+# -------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -------------------------------------
+# Jupyter
+# -------------------------------------
+.ipynb_checkpoints/
+
+# -------------------------------------
+# Machine-learning / large generated files
+# -------------------------------------
+*.pkl
+*.pickle
+*.joblib
+*.h5
+*.hdf5
+*.keras
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
+models/
+checkpoints/
+artifacts/

@@ -1,0 +1,139 @@
+{
+  "profile": {
+    "date_of_birth": "2004-08-15",
+    "biological_sex": "male",
+    "height_cm": 175.0,
+    "weight_kg": 70.8,
+    "activity_level": "moderately_active",
+    "goal": "weight_loss"
+  },
+  "body_weights": [
+    {
+      "logged_date": "2026-07-01",
+      "weight_kg": 72.5
+    },
+    {
+      "logged_date": "2026-07-05",
+      "weight_kg": 72.2
+    },
+    {
+      "logged_date": "2026-07-10",
+      "weight_kg": 71.9
+    },
+    {
+      "logged_date": "2026-07-15",
+      "weight_kg": 71.6
+    },
+    {
+      "logged_date": "2026-07-20",
+      "weight_kg": 71.3
+    },
+    {
+      "logged_date": "2026-07-25",
+      "weight_kg": 71.0
+    },
+    {
+      "logged_date": "2026-07-29",
+      "weight_kg": 70.8
+    }
+  ],
+  "nutrition_logs": [
+    {
+      "logged_date": "2026-07-29",
+      "meal_type": "breakfast",
+      "food_name": "Oatmeal with Banana",
+      "calories_kcal": 420,
+      "protein_g": 18,
+      "carbohydrate_g": 62,
+      "fat_g": 11
+    },
+    {
+      "logged_date": "2026-07-29",
+      "meal_type": "snack",
+      "food_name": "Greek Yogurt and Berries",
+      "calories_kcal": 210,
+      "protein_g": 17,
+      "carbohydrate_g": 28,
+      "fat_g": 4
+    },
+    {
+      "logged_date": "2026-07-29",
+      "meal_type": "lunch",
+      "food_name": "Chicken Rice Bowl",
+      "calories_kcal": 650,
+      "protein_g": 48,
+      "carbohydrate_g": 78,
+      "fat_g": 16
+    },
+    {
+      "logged_date": "2026-07-29",
+      "meal_type": "snack",
+      "food_name": "Apple and Almonds",
+      "calories_kcal": 240,
+      "protein_g": 7,
+      "carbohydrate_g": 29,
+      "fat_g": 12
+    },
+    {
+      "logged_date": "2026-07-29",
+      "meal_type": "dinner",
+      "food_name": "Grilled Paneer with Vegetables",
+      "calories_kcal": 560,
+      "protein_g": 36,
+      "carbohydrate_g": 42,
+      "fat_g": 27
+    }
+  ],
+  "tasks": [
+    {
+      "title": "Drink 2.5 litres of water",
+      "status": "pending"
+    },
+    {
+      "title": "Complete evening workout",
+      "status": "pending"
+    },
+    {
+      "title": "Prepare healthy breakfast",
+      "status": "pending"
+    },
+    {
+      "title": "Log today's meals",
+      "status": "pending"
+    },
+    {
+      "title": "Take evening walk",
+      "status": "pending"
+    },
+    {
+      "title": "Meal prep for tomorrow",
+      "status": "completed",
+      "completed_at": "2026-07-28T19:30:00Z"
+    },
+    {
+      "title": "Track morning weight",
+      "status": "completed",
+      "completed_at": "2026-07-29T06:45:00Z"
+    },
+    {
+      "title": "Complete morning workout",
+      "status": "completed",
+      "completed_at": "2026-07-29T07:30:00Z"
+    }
+  ],
+  "goals": [
+    {
+      "goal_type": "weight_loss",
+      "title": "Reach 68 kg",
+      "description": "Gradually reduce body weight while maintaining healthy nutrition.",
+      "start_date": "2026-07-01",
+      "end_date": "2026-09-30",
+      "weekly_target": 0.5,
+      "target_calories": 2000,
+      "target_protein": 150,
+      "target_carbs": 220,
+      "target_fats": 65,
+      "target_water": 2500
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+Section,Key,Value
+Profile,date_of_birth,
+Profile,biological_sex,
+Profile,height_cm,
+Profile,weight_kg,
+BodyWeight,2026-07-27,70.5 kg
+FoodLog,2026-07-27 breakfast,Oatmeal - 350 kcal
+Task,pending,QA_TASK_1722123456
+Task,pending,QA_TASK_1722123457
