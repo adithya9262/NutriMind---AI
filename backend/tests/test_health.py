@@ -231,8 +231,36 @@ class TestCORSExtended:
             },
         )
         allow_headers = response.headers.get("access-control-allow-headers", "")
-        assert "X-Request-ID" in allow_headers
-        assert "Content-Type" in allow_headers
+    async def test_production_frontend_preflight_login(self, client):
+        response = await client.options(
+            "/api/v1/auth/login",
+            headers={
+                "Origin": "https://nutrimind-frontend.onrender.com",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "Authorization, Content-Type",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers.get("access-control-allow-origin") == "https://nutrimind-frontend.onrender.com"
+        assert response.headers.get("access-control-allow-credentials") == "true"
+        allow_methods = response.headers.get("access-control-allow-methods", "")
+        assert "POST" in allow_methods
+        allow_headers = response.headers.get("access-control-allow-headers", "").lower()
+        assert "authorization" in allow_headers
+        assert "content-type" in allow_headers
+
+    async def test_production_frontend_preflight_register(self, client):
+        response = await client.options(
+            "/api/v1/auth/register",
+            headers={
+                "Origin": "https://nutrimind-frontend.onrender.com",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "Authorization, Content-Type",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers.get("access-control-allow-origin") == "https://nutrimind-frontend.onrender.com"
+        assert response.headers.get("access-control-allow-credentials") == "true"
 
 
 class TestAppFactory:

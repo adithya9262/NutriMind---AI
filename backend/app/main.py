@@ -39,19 +39,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     cors_origins = settings.cors_origins_list
-    
+
     cors_kwargs = {
+        "allow_origins": cors_origins,
         "allow_credentials": True,
-        "allow_methods": ["*"],
-        "allow_headers": ["*", "X-Request-ID", "Content-Disposition", "Authorization"],
+        "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        "allow_headers": ["*", "Authorization", "Content-Type", "X-Request-ID", "Content-Disposition"],
         "expose_headers": ["X-Request-ID", "Content-Disposition", "Authorization"],
     }
-    
+
     if settings.APP_ENV == "development":
-        # Use regex to allow any localhost port
-        cors_kwargs["allow_origin_regex"] = r"^http://(localhost|127\.0\.0\.1):\d+$"
-    else:
-        cors_kwargs["allow_origins"] = cors_origins
+        cors_kwargs["allow_origin_regex"] = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
     app.add_middleware(CORSMiddleware, **cors_kwargs)
 

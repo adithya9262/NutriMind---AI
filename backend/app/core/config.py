@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = Field(default=8000, ge=1, le=65535)
-    CORS_ORIGINS: str = "http://localhost:3000"
+    CORS_ORIGINS: str = "http://localhost:3000,https://nutrimind-frontend.onrender.com"
     PASSWORD_HASHING_SCHEMES: str = "argon2"
 
     # Future settings — not used yet; empty defaults let the app start
