@@ -39,6 +39,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     cors_origins = settings.cors_origins_list
+    prod_frontend = "https://nutrimind-frontend.onrender.com"
+    if prod_frontend not in cors_origins:
+        cors_origins.append(prod_frontend)
 
     cors_kwargs = {
         "allow_origins": cors_origins,
