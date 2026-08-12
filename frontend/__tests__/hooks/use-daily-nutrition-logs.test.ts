@@ -72,9 +72,7 @@ function getHook() {
 
 describe("useDailyNutritionLogs", () => {
   function mountHook() {
-    const hook = getHook();
-    act(() => { hook.result.current.reloadAll(); });
-    return hook;
+    return getHook();
   }
 
   it("starts in loading state", async () => {

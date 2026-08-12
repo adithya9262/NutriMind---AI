@@ -93,13 +93,16 @@ export function useDailyNutritionLogs(
 
   useEffect(() => {
     mountedRef.current = true;
+    loadEntriesRef.current(selectedDate);
+    loadSummaryRef.current(selectedDate);
+    loadProgressRef.current(selectedDate);
     return () => {
       mountedRef.current = false;
       entriesAbortRef.current?.abort();
       summaryAbortRef.current?.abort();
       progressAbortRef.current?.abort();
     };
-  }, []);
+  }, [selectedDate]);
 
   // ── Entries ───────────────────────────────────────────────────────────────
   const loadEntries = useCallback(async (date: string) => {
@@ -112,17 +115,25 @@ export function useDailyNutritionLogs(
     const controller = new AbortController();
     entriesAbortRef.current = controller;
 
-    const result = await listNutritionLogEntries(date, controller.signal);
+    try {
+      const result = await listNutritionLogEntries(date, controller.signal);
 
-    if (!mountedRef.current || fetchId !== entriesFetchRef.current) return;
+      if (!mountedRef.current || fetchId !== entriesFetchRef.current) return;
 
-    if (result.success) {
-      setEntries(result.data.entries);
-      setEntriesStatus(result.data.entries.length === 0 ? "empty" : "available");
-    } else {
+      if (result.success) {
+        setEntries(result.data.entries);
+        setEntriesStatus(result.data.entries.length === 0 ? "empty" : "available");
+      } else {
+        setEntries([]);
+        setEntriesStatus("error");
+        setEntriesError(result.error.message);
+      }
+    } catch (err: unknown) {
+      if ((err as Error)?.name === "AbortError") return;
+      if (!mountedRef.current || fetchId !== entriesFetchRef.current) return;
       setEntries([]);
       setEntriesStatus("error");
-      setEntriesError(result.error.message);
+      setEntriesError((err as Error)?.message || "Failed to load nutrition log entries.");
     }
   }, []);
 
@@ -137,17 +148,25 @@ export function useDailyNutritionLogs(
     const controller = new AbortController();
     summaryAbortRef.current = controller;
 
-    const result = await getDailyNutritionLogSummary(date, controller.signal);
+    try {
+      const result = await getDailyNutritionLogSummary(date, controller.signal);
 
-    if (!mountedRef.current || fetchId !== summaryFetchRef.current) return;
+      if (!mountedRef.current || fetchId !== summaryFetchRef.current) return;
 
-    if (result.success) {
-      setSummary(result.data);
-      setSummaryStatus("available");
-    } else {
+      if (result.success) {
+        setSummary(result.data);
+        setSummaryStatus("available");
+      } else {
+        setSummary(null);
+        setSummaryStatus("error");
+        setSummaryError(result.error.message);
+      }
+    } catch (err: unknown) {
+      if ((err as Error)?.name === "AbortError") return;
+      if (!mountedRef.current || fetchId !== summaryFetchRef.current) return;
       setSummary(null);
       setSummaryStatus("error");
-      setSummaryError(result.error.message);
+      setSummaryError((err as Error)?.message || "Failed to load nutrition summary.");
     }
   }, []);
 
@@ -162,26 +181,34 @@ export function useDailyNutritionLogs(
     const controller = new AbortController();
     progressAbortRef.current = controller;
 
-    const referenceDate = getLocalCalendarDate();
-    const result = await getDailyNutritionTargetProgress(
-      date,
-      referenceDate,
-      controller.signal
-    );
+    try {
+      const referenceDate = getLocalCalendarDate();
+      const result = await getDailyNutritionTargetProgress(
+        date,
+        referenceDate,
+        controller.signal
+      );
 
-    if (!mountedRef.current || fetchId !== progressFetchRef.current) return;
+      if (!mountedRef.current || fetchId !== progressFetchRef.current) return;
 
-    if (result.success) {
-      setProgress(result.data);
-      setProgressStatus("available");
-    } else {
-      setProgress(null);
-      if (result.error.code === "NUTRITION_PROFILE_NOT_FOUND") {
-        setProgressStatus("missing_profile");
+      if (result.success) {
+        setProgress(result.data);
+        setProgressStatus("available");
       } else {
-        setProgressStatus("error");
-        setProgressError(result.error.message);
+        setProgress(null);
+        if (result.error.code === "NUTRITION_PROFILE_NOT_FOUND") {
+          setProgressStatus("missing_profile");
+        } else {
+          setProgressStatus("error");
+          setProgressError(result.error.message);
+        }
       }
+    } catch (err: unknown) {
+      if ((err as Error)?.name === "AbortError") return;
+      if (!mountedRef.current || fetchId !== progressFetchRef.current) return;
+      setProgress(null);
+      setProgressStatus("error");
+      setProgressError((err as Error)?.message || "Failed to load nutrition target progress.");
     }
   }, []);
 
