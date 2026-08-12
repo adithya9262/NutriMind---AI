@@ -2,11 +2,19 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import type { NextResponse } from "next/server"
 
+function getSupabaseCredentials() {
+  const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const envKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const hasValidPair = Boolean(envUrl && envKey && envUrl.trim() !== "" && envKey.trim() !== "")
+  return {
+    url: hasValidPair ? envUrl! : "https://placeholder.supabase.co",
+    key: hasValidPair ? envKey! : "placeholder-anon-key",
+  }
+}
+
 export async function createClient() {
   const cookieStore = await cookies()
-
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co"
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-anon-key"
+  const { url, key } = getSupabaseCredentials()
 
   return createServerClient(
     url,
@@ -35,9 +43,7 @@ export function createRouteHandlerClient(
   response: NextResponse
 ) {
   const cookieHeader = request.headers.get("cookie") ?? ""
-
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co"
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-anon-key"
+  const { url, key } = getSupabaseCredentials()
 
   return createServerClient(
     url,

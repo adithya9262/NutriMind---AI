@@ -1,11 +1,19 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
+function getSupabaseCredentials() {
+  const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const envKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const hasValidPair = Boolean(envUrl && envKey && envUrl.trim() !== "" && envKey.trim() !== "")
+  return {
+    url: hasValidPair ? envUrl! : "https://placeholder.supabase.co",
+    key: hasValidPair ? envKey! : "placeholder-anon-key",
+  }
+}
+
 export function createClient(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
-
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co"
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-anon-key"
+  const { url, key } = getSupabaseCredentials()
 
   const supabase = createServerClient(
     url,
