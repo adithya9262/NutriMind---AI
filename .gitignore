@@ -131,6 +131,6 @@ desktop.ini
 *.onnx
 *.safetensors
 *.ckpt
-models/
+/models/
 checkpoints/
 artifacts/
