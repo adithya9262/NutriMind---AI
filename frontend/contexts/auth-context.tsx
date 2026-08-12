@@ -15,6 +15,7 @@ import { createClient } from "@/lib/supabase/client"
 import { setAccessToken, getAccessToken, clearAllTokens } from "@/lib/token-storage"
 import { syncSupabaseUser } from "@/lib/supabase-sync"
 import { fetchCurrentUser } from "@/services/api/auth"
+import { getAppUrl } from "@/lib/url"
 
 interface AuthContextValue {
   state: AuthState
@@ -234,7 +235,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${getAppUrl()}/auth/callback`,
       },
     })
     if (error) throw error
@@ -245,7 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "apple",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${getAppUrl()}/auth/callback`,
       },
     })
     if (error) throw error
@@ -254,7 +255,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const resetPassword = useCallback(async (email: string): Promise<string | null> => {
     const supabase = supabaseRef.current
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: `${getAppUrl()}/reset-password`,
     })
     return error ? error.message : null
   }, [])

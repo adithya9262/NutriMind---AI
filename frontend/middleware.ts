@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/middleware"
+import { getAppUrl } from "@/lib/url"
 
 const PUBLIC_PATHS = new Set([
   "/", "/login", "/register", "/forgot-password", "/reset-password",
@@ -34,13 +35,14 @@ export async function middleware(request: NextRequest) {
   const { data: { session } } = await supabase.auth.getSession()
 
   if (!session) {
-    const loginUrl = new URL("/login", request.url)
+    const appUrl = getAppUrl()
+    const loginUrl = new URL("/login", appUrl)
     loginUrl.searchParams.set("redirect", pathname)
     return NextResponse.redirect(loginUrl)
   }
 
   if (session && (pathname === "/login" || pathname === "/register")) {
-    return NextResponse.redirect(new URL("/dashboard", request.url))
+    return NextResponse.redirect(new URL("/dashboard", getAppUrl()))
   }
 
   response.headers.set("X-Frame-Options", "DENY")
