@@ -103,7 +103,7 @@ async function doFetch<T>(
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      if (response.status === 401) {
+      if (response.status === 401 && useToken) {
         dispatchSessionExpired();
       }
 

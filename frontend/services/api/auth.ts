@@ -8,6 +8,7 @@ export async function registerUser(
   return apiPost<AuthSuccessResponse["data"]>("/auth/register", data, {
     token: false,
     signal,
+    timeout: 20000,
   });
 }
 
@@ -18,6 +19,7 @@ export async function loginUser(
   return apiPost<AuthSuccessResponse["data"]>("/auth/login", data, {
     token: false,
     signal,
+    timeout: 20000,
   });
 }
 
