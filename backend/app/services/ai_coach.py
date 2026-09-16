@@ -137,7 +137,8 @@ class AICoachService:
 
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{self._gemini_model}:generateContent?key={self._gemini_key}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/{self._gemini_model}:generateContent",
+                headers={"x-goog-api-key": self._gemini_key},
                 json={"contents": contents},
             )
             resp.raise_for_status()
@@ -156,7 +157,8 @@ class AICoachService:
         async with httpx.AsyncClient(timeout=60) as client:
             async with client.stream(
                 "POST",
-                f"https://generativelanguage.googleapis.com/v1beta/models/{self._gemini_model}:streamGenerateContent?alt=sse&key={self._gemini_key}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/{self._gemini_model}:streamGenerateContent?alt=sse",
+                headers={"x-goog-api-key": self._gemini_key},
                 json={"contents": contents},
             ) as resp:
                 resp.raise_for_status()
@@ -226,7 +228,8 @@ class AICoachService:
 
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={self._gemini_key}",
+                "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent",
+                headers={"x-goog-api-key": self._gemini_key},
                 json={
                     "model": "models/text-embedding-004",
                     "content": {"parts": [{"text": text}]},

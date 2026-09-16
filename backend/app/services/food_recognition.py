@@ -50,7 +50,7 @@ FOOD_ANALYSIS_PROMPT = (
 
 
 class FoodRecognitionService:
-    def __init__(self, gemini_api_key: str = "", groq_api_key: str = "", usda_api_key: str = "", gemini_model: str = "gemini-2.0-flash") -> None:
+    def __init__(self, gemini_api_key: str = "", groq_api_key: str = "", usda_api_key: str = "", gemini_model: str = "gemini-3.8-flash") -> None:
         self._gemini_key = gemini_api_key
         self._groq_key = groq_api_key
         self._gemini_model = gemini_model
@@ -104,14 +104,21 @@ class FoodRecognitionService:
     async def _analyze_gemini(self, image_bytes: bytes, mime: str) -> RecognitionResult:
         image_b64 = base64.b64encode(image_bytes).decode()
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._gemini_model}:generateContent?key={self._gemini_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._gemini_model}:generateContent"
+        headers = {
+            "x-goog-api-key": self._gemini_key,
+            "Content-Type": "application/json",
+        }
         payload = {
             "contents": [{
                 "parts": [
                     {"text": FOOD_ANALYSIS_PROMPT},
                     {"inline_data": {"mime_type": mime, "data": image_b64}},
                 ]
-            }]
+            }],
+            "generationConfig": {
+                "responseMimeType": "application/json"
+            }
         }
 
         logger = logging.getLogger(__name__)
@@ -119,7 +126,7 @@ class FoodRecognitionService:
                      self._gemini_model, mime, len(image_bytes), len(FOOD_ANALYSIS_PROMPT))
 
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(url, json=payload)
+            resp = await client.post(url, headers=headers, json=payload)
             logger.info("Gemini response — status=%d, body=%s", resp.status_code, resp.text[:2000])
             resp.raise_for_status()
             data = resp.json()
@@ -160,8 +167,9 @@ class FoodRecognitionService:
         name = (filename or "food").rsplit(".", 1)[0]
         name = re.sub(r"[_-]", " ", name)
         name = re.sub(r"\s+", " ", name).strip()
-        if not name or name.lower() in ("food", "image", "photo", "img", "pic"):
-            raise RuntimeError("Could not infer food from filename")
+        generic_names = {"food", "image", "photo", "img", "pic", "untitled", "jpeg", "jpg", "png", "webp", "heic", "file", "upload"}
+        if not name or name.lower() in generic_names:
+            return RecognitionResult(foods=(), raw_response="Could not identify food from generic filename")
 
         result = await self._food_search.search(name, max_results=5)
         if not result.foods:

@@ -91,11 +91,14 @@ async def analyze_food_image(
         }
     except Exception as exc:
         logger.exception("Food recognition failed")
-        return {
-            "success": False,
-            "message": f"Food analysis failed: {exc}",
-            "data": {
-                "foods": [],
-                "raw_response": str(exc),
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "success": False,
+                "message": "Food analysis service is temporarily unavailable. Please try again.",
+                "data": {
+                    "foods": [],
+                    "raw_response": "Service unavailable",
+                },
             },
-        }
+        )

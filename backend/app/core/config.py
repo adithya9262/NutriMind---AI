@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     USDA_API_KEY: str = ""
     GROQ_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-3.8-flash"
     OPENFOODFACTS_BASE_URL: str = "https://world.openfoodfacts.org/api/v2"
     OPENFOODFACTS_USER_AGENT: str = "NutriMindAI/1.0"
 
