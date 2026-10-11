@@ -1,4 +1,5 @@
 import { createBrowserClient } from "@supabase/ssr"
+import { supabaseCookieOptions } from "./cookie-options"
 
 let client: ReturnType<typeof createBrowserClient> | null = null
 
@@ -15,6 +16,6 @@ function getSupabaseCredentials() {
 export function createClient() {
   if (client) return client
   const { url, key } = getSupabaseCredentials()
-  client = createBrowserClient(url, key)
+  client = createBrowserClient(url, key, { cookieOptions: supabaseCookieOptions })
   return client
 }

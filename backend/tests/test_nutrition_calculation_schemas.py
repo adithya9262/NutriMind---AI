@@ -1232,18 +1232,22 @@ class TestSchemaBoundaries:
 
 class TestApplicationBoundaries:
     def test_existing_routes_unchanged(self):
+        from fastapi.routing import iter_route_contexts
+
         import app.api.v1.router as router_mod
 
-        routes = router_mod.router.routes
+        routes = iter_route_contexts(router_mod.router.routes)
         route_paths = {r.path for r in routes}
         expected = {"/auth/me", "/auth/register", "/auth/login", "/health", "/nutrition-profile"}
         for path in expected:
             assert path in route_paths, f"Expected route {path} not found"
 
     def test_no_calculation_route_exists(self):
+        from fastapi.routing import iter_route_contexts
+
         import app.api.v1.router as router_mod
 
-        routes = router_mod.router.routes
+        routes = iter_route_contexts(router_mod.router.routes)
         route_paths = {r.path for r in routes}
         assert "/nutrition-calculations" not in route_paths
         assert "/calculate" not in route_paths

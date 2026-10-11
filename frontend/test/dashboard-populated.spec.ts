@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { getSupabaseAccessToken } from './helpers/supabase-session'
 
 function uuidv4() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -37,7 +38,7 @@ test.describe('Dashboard Layout — Populated Data Verification', () => {
     await page.click('button[type="submit"]')
     await page.waitForTimeout(3000)
 
-    const token = await page.evaluate(() => localStorage.getItem('backend_access_token'))
+    const token = await getSupabaseAccessToken(page)
     const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
     const apiBase = 'http://localhost:8000/api/v1'
 
@@ -98,7 +99,7 @@ test.describe('Dashboard Layout — Populated Data Verification', () => {
 
     const stateA = await page.evaluate(() => {
       const main = document.querySelector('main > .space-y-6')
-      if (!main) return {}
+      if (!main) return { error: 'dashboard main container not found' }
       const children = Array.from(main.children).map((el, i) => {
         const r = el.getBoundingClientRect()
         return { i, y: Math.round(r.y), h: Math.round(r.height), text: (el.textContent || '').trim().substring(0, 60) }
@@ -118,6 +119,8 @@ test.describe('Dashboard Layout — Populated Data Verification', () => {
       return { children, twoCols, skeletonCount: skels.length, gapBeforeLog }
     })
 
+    if ('error' in stateA) throw new Error(stateA.error)
+
     // STATE B — after refresh
     await page.reload({ waitUntil: 'networkidle' })
     await page.waitForTimeout(3000)
@@ -127,7 +130,7 @@ test.describe('Dashboard Layout — Populated Data Verification', () => {
 
     const stateB = await page.evaluate(() => {
       const main = document.querySelector('main > .space-y-6')
-      if (!main) return {}
+      if (!main) return { error: 'dashboard main container not found after refresh' }
       const twoCols = Array.from(document.querySelectorAll('main .flex.flex-col.lg\\:flex-row.gap-6')).map((el, i) => {
         const r = el.getBoundingClientRect()
         const kids = Array.from(el.children).map((c, j) => {
@@ -139,6 +142,8 @@ test.describe('Dashboard Layout — Populated Data Verification', () => {
       const skels = document.querySelectorAll('[class*="skeleton" i], [class*="Skeleton" i]')
       return { twoCols, skeletonCount: skels.length }
     })
+
+    if ('error' in stateB) throw new Error(stateB.error)
 
     // Verify data exists
     const verifyData = await page.evaluate(async (args) => {

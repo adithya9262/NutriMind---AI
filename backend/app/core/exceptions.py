@@ -9,11 +9,15 @@ from .middleware import get_request_id
 logger = logging.getLogger(__name__)
 
 
+def _request_id(request: Request) -> str:
+    return get_request_id() or request.scope.get("state", {}).get("request_id", "-")
+
+
 async def validation_exception_handler(
     request: Request,
     exc: RequestValidationError,
 ) -> JSONResponse:
-    request_id = get_request_id() or "-"
+    request_id = _request_id(request)
     errors = exc.errors()
     sanitized_errors: list[dict[str, object]] = []
     for err in errors:
@@ -42,7 +46,7 @@ async def validation_exception_handler(
 
 
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    request_id = get_request_id() or "-"
+    request_id = _request_id(request)
     headers = dict(exc.headers or {})
     headers["X-Request-ID"] = request_id
     if isinstance(exc.detail, dict):
@@ -59,11 +63,8 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
 
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    request_id = get_request_id() or "-"
-    logger.exception(
-        "Unhandled exception",
-        extra={"request_id": request_id},
-    )
+    request_id = _request_id(request)
+    logger.error("Unhandled exception (%s)", type(exc).__name__, extra={"request_id": request_id})
     return JSONResponse(
         status_code=500,
         content={

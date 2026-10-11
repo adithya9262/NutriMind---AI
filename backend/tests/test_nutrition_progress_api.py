@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import uuid
 from datetime import UTC, date, datetime, timedelta
@@ -7,6 +8,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -150,6 +152,33 @@ def _setup_session_with_profile_and_logs(
     session.rollback = AsyncMock()
 
 
+class TaskYieldingASGIClient:
+    """Schedule each in-process request separately and bound any transport stall."""
+
+    def __init__(self, async_client: AsyncClient):
+        self.async_client = async_client
+
+    async def request(self, method: str, url: str, **kwargs):
+        request = asyncio.create_task(self.async_client.request(method, url, **kwargs))
+        await asyncio.sleep(0.1)
+        return await asyncio.wait_for(request, timeout=15)
+
+    async def get(self, url: str, **kwargs):
+        return await self.request("GET", url, **kwargs)
+
+    async def post(self, url: str, **kwargs):
+        return await self.request("POST", url, **kwargs)
+
+    async def put(self, url: str, **kwargs):
+        return await self.request("PUT", url, **kwargs)
+
+    async def patch(self, url: str, **kwargs):
+        return await self.request("PATCH", url, **kwargs)
+
+    async def delete(self, url: str, **kwargs):
+        return await self.request("DELETE", url, **kwargs)
+
+
 def _dec(value: str) -> Decimal:
     return Decimal(value)
 
@@ -165,6 +194,7 @@ def test_settings():
         APP_ENV="test",
         DEBUG=False,
         CORS_ORIGINS="http://test",
+        DATABASE_URL="",
         JWT_SECRET_KEY="test-secret-key-that-is-at-least-32-characters!!",
     )
 
@@ -177,7 +207,11 @@ def mock_session():
 @pytest.fixture
 def app(test_settings, mock_session):
     application = create_app(settings=test_settings)
-    application.dependency_overrides[deps_get_settings] = lambda: test_settings
+
+    async def override_get_settings():
+        return test_settings
+
+    application.dependency_overrides[deps_get_settings] = override_get_settings
 
     async def override_get_db_session():
         try:
@@ -186,14 +220,17 @@ def app(test_settings, mock_session):
             pass
 
     application.dependency_overrides[get_db_session] = override_get_db_session
-    return application
+    try:
+        yield application
+    finally:
+        application.dependency_overrides.clear()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(app):
     transport = ASGITransport(app=app, raise_app_exceptions=False)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    async with AsyncClient(transport=transport, base_url="http://test") as async_client:
+        yield TaskYieldingASGIClient(async_client)
 
 
 # ===========================================================================
@@ -227,14 +264,16 @@ class TestRouteRegistration:
         assert response.status_code in (401, 405)
 
     async def test_progress_before_entry_id(self, app):
-        routes = [r.path for r in app.routes if "nutrition-logs" in r.path]
+        routes = [path for path in app.openapi()["paths"] if "nutrition-logs" in path]
         progress_idx = routes.index("/api/v1/nutrition-logs/progress")
         entry_id_idx = routes.index("/api/v1/nutrition-logs/{entry_id}")
         assert progress_idx < entry_id_idx
 
     async def test_no_duplicate_progress_path(self, app):
         progress_routes = [
-            r.path for r in app.routes if r.path == "/api/v1/nutrition-logs/progress"
+            path
+            for path in app.openapi()["paths"]
+            if path == "/api/v1/nutrition-logs/progress"
         ]
         assert len(progress_routes) == 1
 
@@ -620,7 +659,7 @@ class TestUserIsolation:
         assert response.status_code == 200
 
     async def test_no_user_id_path_param(self, app):
-        paths = [r.path for r in app.routes if PROGRESS_URL in r.path]
+        paths = [path for path in app.openapi()["paths"] if PROGRESS_URL in path]
         assert all("user_id" not in p for p in paths)
 
     async def test_user_id_not_in_response(self, client, test_settings, mock_session):
@@ -639,15 +678,38 @@ class TestUserIsolation:
         user = _make_user()
         profile = _make_profile(user_id=user.id)
         other_user_id = uuid.uuid4()
-        entries = [_make_nutrition_log(user_id=other_user_id)]
-        _setup_session_with_profile_and_logs(mock_session, user, profile, entries)
+        other_user_entry = _make_nutrition_log(user_id=other_user_id)
+        query_count = 0
+
+        async def execute_for_authenticated_user(statement):
+            nonlocal query_count
+            query_count += 1
+            if query_count == 1:
+                return _make_execute_result(user)
+            if query_count == 2:
+                return _make_execute_result(profile)
+            assert query_count == 3
+            compiled = statement.compile()
+            params = compiled.params.values()
+            assert "nutrition_logs.user_id" in str(statement)
+            assert user.id in params
+            matching_entries = [
+                entry for entry in [other_user_entry] if entry.user_id == user.id
+            ]
+            return _make_entries_result(matching_entries)
+
+        mock_session.execute = AsyncMock(side_effect=execute_for_authenticated_user)
+        mock_session.commit = AsyncMock()
+        mock_session.flush = AsyncMock()
+        mock_session.rollback = AsyncMock()
         token = create_access_token(user_id=user.id, settings=test_settings)
         response = await client.get(
-            PROGRESS_URL,
-            params={"logged_date": "2026-07-12", "reference_date": "2026-07-12"},
+            f"{PROGRESS_URL}?logged_date=2026-07-12&reference_date=2026-07-12",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 200
+        assert other_user_entry.user_id != user.id
+        assert other_user_entry.food_name not in response.text
 
 
 # ===========================================================================

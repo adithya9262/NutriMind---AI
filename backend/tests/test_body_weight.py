@@ -1217,7 +1217,7 @@ class TestPhaseBoundaries:
 
         migration_dir = "alembic/versions"
         files = [f for f in os.listdir(migration_dir) if f.endswith(".py") and f != "__init__.py"]
-        assert len(files) == 7
+        assert len(files) == 13
 
     def test_migration_head_updated(self):
         from alembic.config import Config
@@ -1226,7 +1226,7 @@ class TestPhaseBoundaries:
         alembic_cfg = Config("alembic.ini")
         script = ScriptDirectory.from_config(alembic_cfg)
         head = script.get_current_head()
-        assert head == "0295723946b2"
+        assert head == "91ac4e3d7b20"
 
     def test_frontend_body_weight_files_exist(self):
         import os

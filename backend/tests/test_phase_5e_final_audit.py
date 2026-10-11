@@ -680,19 +680,30 @@ class TestNoSystemClockFallback:
 
 class TestExactRouteInventory:
     def test_exactly_six_task_operations(self):
+        from fastapi.routing import iter_route_contexts
+
         from app.main import create_app
 
         app = create_app()
-        task_routes = [r for r in app.routes if hasattr(r, "path") and "tasks" in r.path]
+        task_routes = [
+            r for r in iter_route_contexts(app.routes)
+            if hasattr(r, "path") and "tasks" in r.path
+        ]
         methods = sum(len(getattr(r, "methods", [])) for r in task_routes)
-        # GET /tasks, POST /tasks, GET /tasks/{id}, DELETE /tasks/{id}, POST /complete, POST /reopen + any update
+        # GET /tasks, POST /tasks, GET /tasks/{id}, DELETE /tasks/{id},
+        # POST /complete, POST /reopen + any update
         assert methods == 7, f"Expected 7 operations, found {methods}"
 
     def test_exactly_four_task_paths(self):
+        from fastapi.routing import iter_route_contexts
+
         from app.main import create_app
 
         app = create_app()
-        task_paths = {r.path for r in app.routes if hasattr(r, "path") and "tasks" in r.path}
+        task_paths = {
+            r.path for r in iter_route_contexts(app.routes)
+            if hasattr(r, "path") and "tasks" in r.path
+        }
         expected = {
             "/api/v1/tasks",
             "/api/v1/tasks/{task_id}",
@@ -702,11 +713,16 @@ class TestExactRouteInventory:
         assert task_paths == expected, f"Expected {expected}, got {task_paths}"
 
     def test_no_duplicate_task_router(self):
+        from fastapi.routing import iter_route_contexts
+
         from app.main import create_app
 
         # Check the final app routes - tasks should appear exactly once in the path set
         app = create_app()
-        task_paths = {r.path for r in app.routes if hasattr(r, "path") and "tasks" in r.path}
+        task_paths = {
+            r.path for r in iter_route_contexts(app.routes)
+            if hasattr(r, "path") and "tasks" in r.path
+        }
         expected_paths = {
             "/api/v1/tasks",
             "/api/v1/tasks/{task_id}",
@@ -911,7 +927,14 @@ class TestORMMetadata:
         assert len(Base.metadata.tables) == 6
 
     def test_exact_table_names(self):
-        expected = {"users", "nutrition_profiles", "nutrition_logs", "body_weights", "tasks", "goals"}
+        expected = {
+            "users",
+            "nutrition_profiles",
+            "nutrition_logs",
+            "body_weights",
+            "tasks",
+            "goals",
+        }
         assert set(Base.metadata.tables.keys()) == expected
 
     def test_tasks_table_columns(self):
@@ -956,7 +979,7 @@ class TestMigrationGraph:
         script = ScriptDirectory.from_config(config)
         heads = script.get_heads()
         assert len(heads) == 1
-        assert heads[0] == "0295723946b2"
+        assert heads[0] == "91ac4e3d7b20"
 
     def test_linear_chain(self):
         config = Config("alembic.ini")
@@ -1117,7 +1140,11 @@ class TestNoEnvFilesOrSecrets:
                 if matches and "test" not in str(py_file).lower():
                     # Filter out obvious test/placeholder values
                     real_matches = [
-                        m for m in matches if "test" not in m.lower() and "example" not in m.lower() and "qa" not in py_file.name.lower()
+                        m
+                        for m in matches
+                        if "test" not in m.lower()
+                        and "example" not in m.lower()
+                        and "qa" not in py_file.name.lower()
                     ]
                     assert not real_matches, f"Potential secret in {py_file}: {real_matches}"
 
@@ -1274,7 +1301,7 @@ class TestPhase5EFreezeBoundaries:
         config = Config("alembic.ini")
         script = ScriptDirectory.from_config(config)
         heads = script.get_heads()
-        assert heads == ["0295723946b2"]
+        assert heads == ["91ac4e3d7b20"]
 
     def test_no_env_or_secrets(self):
         # Verified by TestNoEnvFilesOrSecrets

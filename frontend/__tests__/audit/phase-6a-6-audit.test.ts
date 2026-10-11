@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 /*
  * Phase 6A-6 Final Audit Tests
@@ -31,9 +33,7 @@ describe("Architecture invariants", () => {
   it("has exactly one token-storage utility", async () => {
     const storage = await import("@/lib/token-storage");
     expect(typeof storage.getAccessToken).toBe("function");
-    expect(typeof storage.setAccessToken).toBe("function");
-    expect(typeof storage.removeAccessToken).toBe("function");
-    expect(storage.getAccessToken("supabase")).toBeNull(); // no token in test env
+    await expect(storage.getAccessToken()).resolves.toBeNull();
   });
 
   it("no duplicate API service modules", async () => {
@@ -89,16 +89,15 @@ describe("Security and privacy invariants", () => {
     }
   });
 
-  it("no password stored in localStorage", () => {
-    const storageKey = "nutrimind_access_token";
-    expect(storageKey).not.toContain("password");
-    expect(storageKey).not.toContain("credential");
+  it("does not use localStorage for authentication tokens", () => {
+    const source = readFileSync(resolve(process.cwd(), "lib/token-storage.ts"), "utf-8");
+    expect(source).not.toMatch(/localStorage|sessionStorage/);
   });
 
   it("does not export a second token storage key", async () => {
     const storage = await import("@/lib/token-storage");
     const modKeys = Object.keys(storage).sort();
-    expect(modKeys).toEqual(["clearAllTokens", "getAccessToken", "removeAccessToken", "setAccessToken"]);
+    expect(modKeys).toEqual(["getAccessToken"]);
   });
 });
 

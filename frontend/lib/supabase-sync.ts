@@ -1,4 +1,4 @@
-import { getAccessToken, setAccessToken } from "./token-storage"
+import { createClient } from "@/lib/supabase/client"
 import type { PublicUser } from "@/types/auth"
 
 interface SyncResult {
@@ -12,7 +12,8 @@ interface SyncResult {
 const SYNC_REQUEST_TIMEOUT_MS = 8000
 
 export async function syncSupabaseUser(): Promise<SyncResult> {
-  const supabaseToken = getAccessToken("supabase")
+  const { data: { session } } = await createClient().auth.getSession()
+  const supabaseToken = session?.access_token
   if (!supabaseToken) {
     return { success: false, error: "No Supabase session found." }
   }
@@ -45,7 +46,6 @@ export async function syncSupabaseUser(): Promise<SyncResult> {
     const result = await response.json()
 
     if (result.success && result.data) {
-      setAccessToken(result.data.access_token, "backend")
       return {
         success: true,
         data: {

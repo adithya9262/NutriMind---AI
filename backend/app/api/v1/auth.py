@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
+import uuid
 
 import httpx
-import jwt as pyjwt
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -34,6 +34,7 @@ from app.services.authentication import AuthenticationService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
 
 async def verify_supabase_token(access_token: str, settings: Settings) -> dict | None:
     if not settings.SUPABASE_URL:
@@ -95,16 +96,6 @@ async def supabase_sync(
 
     supabase_user = await verify_supabase_token(token, settings)
     if supabase_user is None:
-        try:
-            claims = pyjwt.decode(token, options={"verify_signature": False})
-            sub = claims.get("sub", "")
-            email = claims.get("email", "")
-            if sub and email:
-                supabase_user = {"id": sub, "email": email}
-        except Exception:
-            pass
-
-    if supabase_user is None:
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={
@@ -118,6 +109,33 @@ async def supabase_sync(
         )
 
     supabase_email = (supabase_user.get("email") or "").strip().lower()
+    supabase_user_id = supabase_user.get("id")
+    if not supabase_user_id:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={
+                "success": False,
+                "error": {
+                    "code": "INVALID_SUPABASE_IDENTITY",
+                    "message": "The Supabase identity is invalid.",
+                    "request_id": request_id,
+                },
+            },
+        )
+    try:
+        uuid.UUID(str(supabase_user_id))
+    except (TypeError, ValueError):
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={
+                "success": False,
+                "error": {
+                    "code": "INVALID_SUPABASE_IDENTITY",
+                    "message": "The Supabase identity is invalid.",
+                    "request_id": request_id,
+                },
+            },
+        )
     if not supabase_email:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -131,18 +149,28 @@ async def supabase_sync(
             },
         )
 
+    if not supabase_user.get("email_confirmed_at"):
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={
+                "success": False,
+                "error": {
+                    "code": "EMAIL_NOT_VERIFIED",
+                    "message": "Verify your email before linking this account.",
+                    "request_id": request_id,
+                },
+            },
+        )
+
     repo = UserRepository(session)
     auth_service = AuthenticationService(repo)
 
     try:
         user = await auth_service.sync_supabase_user(
             supabase_email=supabase_email,
-            supabase_user_id=supabase_user.get("id", ""),
+            supabase_user_id=supabase_user_id,
+            email_verified=True,
         )
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"[DIAG] GOOGLE SYNC: provider=google email={supabase_email} supabase_sub={supabase_user.get('id','')} resolved_backend_id={user.id} resolved_backend_email={user.email} password_hash_prefix={user.password_hash[:12]}")
-        print(f"[DIAG] GOOGLE SYNC: provider=google email={supabase_email} supabase_sub={supabase_user.get('id','')} resolved_backend_id={user.id} resolved_backend_email={user.email} password_hash_prefix={user.password_hash[:12]}", flush=True)
     except EmailAlreadyRegisteredError:
         await session.rollback()
         return JSONResponse(
@@ -152,6 +180,19 @@ async def supabase_sync(
                 "error": {
                     "code": "EMAIL_ALREADY_REGISTERED",
                     "message": "An account with this email already exists.",
+                    "request_id": request_id,
+                },
+            },
+        )
+    except OAuthAccountExistsError:
+        await session.rollback()
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "success": False,
+                "error": {
+                    "code": "IDENTITY_CONFLICT",
+                    "message": "This Supabase identity conflicts with an existing account.",
                     "request_id": request_id,
                 },
             },
@@ -285,7 +326,10 @@ async def login(
                 "success": False,
                 "error": {
                     "code": "OAUTH_ACCOUNT_EXISTS",
-                    "message": "This account was created with Google or Apple. Please sign in with Google or Apple, or use 'Forgot Password' to set a password.",
+                    "message": (
+                        "This account was created with Google or Apple. Please sign in with "
+                        "Google or Apple, or use 'Forgot Password' to set a password."
+                    ),
                     "request_id": request_id,
                 },
             },
@@ -341,6 +385,4 @@ async def login(
 )
 async def diag_last_sync() -> dict:
     """Temporary diagnostic endpoint - remove after investigation."""
-    return {
-        "message": "Call /auth/supabase-sync from frontend to trigger sync logging"
-    }
+    return {"message": "Call /auth/supabase-sync from frontend to trigger sync logging"}

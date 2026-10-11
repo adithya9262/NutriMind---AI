@@ -1,4 +1,5 @@
 import { test } from '@playwright/test'
+import { getSupabaseAccessToken } from './helpers/supabase-session'
 
 test.setTimeout(300000)
 
@@ -43,10 +44,8 @@ test('direct fetch from browser context', async ({ page }) => {
 
   // Now manually fetch tasks endpoint from browser context
   console.log('\n=== DIRECT FETCH TEST ===')
-  const result = await page.evaluate(async () => {
-    const token = localStorage.getItem('backend_access_token')
-    if (!token) return { error: 'no token' }
-
+  const token = await getSupabaseAccessToken(page)
+  const result = await page.evaluate(async (accessToken) => {
     const results: any[] = []
     const apiBase = 'http://localhost:8000/api/v1'
     
@@ -56,7 +55,7 @@ test('direct fetch from browser context', async ({ page }) => {
       const timeoutId = setTimeout(() => controller1.abort(), 5000)
       const resp = await fetch(`${apiBase}/tasks`, {
         method: 'GET',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
         signal: controller1.signal
       })
       clearTimeout(timeoutId)
@@ -68,7 +67,7 @@ test('direct fetch from browser context', async ({ page }) => {
     }
 
     return results
-  })
+  }, token)
 
   console.log('Fetch results:', JSON.stringify(result, null, 2))
   

@@ -47,7 +47,7 @@ def _body_weight_migration_module():
 
 class TestBodyWeightMigrationGraph:
     def test_exactly_five_migration_revisions(self):
-        assert len(_migration_files()) == 7
+        assert len(_migration_files()) == 13
 
     def test_new_revision_down_revision_is_nutrition_logs(self):
         mod = _body_weight_migration_module()
@@ -73,7 +73,7 @@ class TestBodyWeightMigrationGraph:
         config = Config(str(ALEMBIC_INI))
         script = ScriptDirectory.from_config(config)
         heads = script.get_heads()
-        assert heads[0] == "0295723946b2"
+        assert heads[0] == "91ac4e3d7b20"
 
     def test_no_branches(self):
         config = Config(str(ALEMBIC_INI))
@@ -150,7 +150,7 @@ class TestExistingMigrationIntegrity:
 
     def test_only_new_migration_added(self):
         files = _migration_files()
-        assert len(files) == 7
+        assert len(files) == 13
 
 
 # ---------------------------------------------------------------------------

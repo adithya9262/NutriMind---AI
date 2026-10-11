@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import type { NextResponse } from "next/server"
+import { supabaseCookieOptions } from "./cookie-options"
 
 function getSupabaseCredentials() {
   const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -34,6 +35,7 @@ export async function createClient() {
           }
         },
       },
+      cookieOptions: supabaseCookieOptions,
     }
   )
 }
@@ -69,6 +71,7 @@ export function createRouteHandlerClient(
           })
         },
       },
+      cookieOptions: supabaseCookieOptions,
     }
   )
 }

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import jwt
 import pytest
+import pytest_asyncio
 from fastapi import Depends
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,7 +86,10 @@ def mock_session():
 def app(test_settings, mock_session):
     app = create_app(settings=test_settings)
 
-    app.dependency_overrides[deps_get_settings] = lambda: test_settings
+    async def override_get_settings():
+        return test_settings
+
+    app.dependency_overrides[deps_get_settings] = override_get_settings
 
     async def override_get_db_session():
         try:
@@ -102,19 +107,37 @@ def app(test_settings, mock_session):
             "is_active": user.is_active,
         }
 
-    return app
+    try:
+        yield app
+    finally:
+        app.dependency_overrides.clear()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+        yield TaskYieldingASGIClient(ac)
 
 
 # ---------------------------------------------------------------------------
 # HTTPBearer configuration
 # ---------------------------------------------------------------------------
+
+
+class TaskYieldingASGIClient:
+    """Schedule each in-process request separately and bound transport stalls."""
+
+    def __init__(self, async_client: AsyncClient):
+        self.async_client = async_client
+
+    async def request(self, method: str, url: str, **kwargs):
+        request = asyncio.create_task(self.async_client.request(method, url, **kwargs))
+        await asyncio.sleep(0.1)
+        return await asyncio.wait_for(request, timeout=15)
+
+    async def get(self, url: str, **kwargs):
+        return await self.request("GET", url, **kwargs)
 
 
 class TestHTTPBearerConfiguration:

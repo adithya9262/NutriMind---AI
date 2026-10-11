@@ -1,4 +1,7 @@
+import asyncio
+
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core.config import Settings
@@ -11,6 +14,7 @@ def test_settings():
         APP_ENV="test",
         DEBUG=False,
         CORS_ORIGINS="http://test",
+        DATABASE_URL="",
     )
 
 
@@ -19,11 +23,30 @@ def app(test_settings):
     return create_app(settings=test_settings)
 
 
-@pytest.fixture
+class TaskYieldingASGIClient:
+    def __init__(self, async_client: AsyncClient):
+        self.async_client = async_client
+
+    async def request(self, method: str, url: str, **kwargs):
+        request = asyncio.create_task(self.async_client.request(method, url, **kwargs))
+        await asyncio.sleep(0.1)
+        return await asyncio.wait_for(request, timeout=15)
+
+    async def get(self, url: str, **kwargs):
+        return await self.request("GET", url, **kwargs)
+
+    async def post(self, url: str, **kwargs):
+        return await self.request("POST", url, **kwargs)
+
+    async def options(self, url: str, **kwargs):
+        return await self.request("OPTIONS", url, **kwargs)
+
+
+@pytest_asyncio.fixture
 async def client(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+        yield TaskYieldingASGIClient(ac)
 
 
 class TestHealthEndpoint:
@@ -231,6 +254,9 @@ class TestCORSExtended:
             },
         )
         allow_headers = response.headers.get("access-control-allow-headers", "")
+        assert response.status_code == 200
+        assert "x-request-id" in allow_headers.lower()
+
     async def test_production_frontend_preflight_login(self, client):
         response = await client.options(
             "/api/v1/auth/login",

@@ -10,14 +10,14 @@ test('Full QA Verification', async ({ browser }) => {
   const uid = Date.now();
   const email = `qa_user_${uid}@example.com`;
   const pwd = 'QaPassword123!';
-  const results = {};
+  const results: Record<string, { errors: string[] }> = {};
 
-  const reportError = (phase, msg) => {
+  const reportError = (phase: string, msg: string) => {
     console.error(`[ERROR][${phase}] ${msg}`);
-    if (!results[phase]) results[phase] = { errors: [] };
-    results[phase].errors.push(msg);
+    const phaseResult = results[phase] ??= { errors: [] };
+    phaseResult.errors.push(msg);
   };
-  const log = (phase, msg) => {
+  const log = (phase: string, msg: string) => {
     console.log(`[INFO][${phase}] ${msg}`);
   };
 
@@ -41,6 +41,7 @@ test('Full QA Verification', async ({ browser }) => {
   // 3. STATE A - Empty User Dashboard
   await page.screenshot({ path: '../test-results/qa_dashboard_empty.png' });
   const dashboardText = await page.textContent('body');
+  if (dashboardText === null) throw new Error('Dashboard page body was unavailable')
   if (dashboardText.includes('Failed to fetch') || dashboardText.includes('Retry')) {
     reportError('DASHBOARD_EMPTY', 'Found Failed to fetch or Retry on new user dashboard');
   }
@@ -66,6 +67,7 @@ test('Full QA Verification', async ({ browser }) => {
     await page.getByRole('button', { name: /create goal/i }).click();
     await page.waitForTimeout(1500);
     const goalsText = await page.textContent('body');
+    if (goalsText === null) throw new Error('Goals page body was unavailable')
     if (!goalsText.includes(`QA_GOAL_${uid}`)) {
        reportError('GOALS', 'Goal creation failed, title not found on page');
     }
@@ -86,6 +88,7 @@ test('Full QA Verification', async ({ browser }) => {
     await page.getByRole('button', { name: /create task/i }).click();
     await page.waitForTimeout(1500);
     const tasksText = await page.textContent('body');
+    if (tasksText === null) throw new Error('Tasks page body was unavailable')
     if (!tasksText.includes(`QA_TASK_${uid}`)) {
        reportError('TASKS', 'Task creation failed, title not found on page');
     }
@@ -137,6 +140,7 @@ test('Full QA Verification', async ({ browser }) => {
   await page.goto('http://localhost:3000/tasks');
   await page.waitForTimeout(2000);
   let pageText = await page.textContent('body');
+  if (pageText === null) throw new Error('Tasks page body after import was unavailable')
   if (pageText.includes('Failed to fetch') || pageText.includes('Could not load tasks')) {
     reportError('POST_IMPORT_TASKS', 'Failed to fetch tasks after import');
   }
@@ -144,6 +148,7 @@ test('Full QA Verification', async ({ browser }) => {
   await page.goto('http://localhost:3000/goals');
   await page.waitForTimeout(2000);
   pageText = await page.textContent('body');
+  if (pageText === null) throw new Error('Goals page body after import was unavailable')
   if (pageText.includes('Failed to fetch')) {
     reportError('POST_IMPORT_GOALS', 'Failed to fetch goals after import');
   }
@@ -152,6 +157,7 @@ test('Full QA Verification', async ({ browser }) => {
   await page.waitForTimeout(3000);
   await page.screenshot({ path: '../test-results/qa_dashboard_populated.png' });
   pageText = await page.textContent('body');
+  if (pageText === null) throw new Error('Dashboard page body after import was unavailable')
   if (pageText.includes('Failed to fetch')) {
     reportError('POST_IMPORT_DASHBOARD', 'Failed to fetch on populated dashboard');
   }

@@ -38,16 +38,23 @@ class UserRepository:
         result = await self._session.execute(stmt)
         return result.scalars().one_or_none()
 
+    async def get_by_supabase_id(self, supabase_user_id: uuid.UUID) -> User | None:
+        stmt = select(User).where(User.supabase_user_id == supabase_user_id)
+        result = await self._session.execute(stmt)
+        return result.scalars().one_or_none()
+
     async def create(
         self,
         *,
         email: str,
         password_hash: str,
         user_id: uuid.UUID | None = None,
+        supabase_user_id: uuid.UUID | None = None,
     ) -> User:
         user = User(email=email, password_hash=password_hash)
         if user_id is not None:
             user.id = user_id
+        user.supabase_user_id = supabase_user_id
         self._session.add(user)
         try:
             await self._session.flush()

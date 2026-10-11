@@ -6,6 +6,8 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
+from fastapi.routing import iter_route_contexts
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +21,7 @@ from app.db.dependencies import get_db_session
 from app.main import create_app
 from app.models.nutrition_log import NutritionLog
 from app.models.user import User
+from tests.asgi_client import TaskYieldingASGIClient
 
 NOW = datetime.now(UTC)
 TEST_LOGGED_DATE = date(2026, 7, 12)
@@ -117,7 +120,10 @@ def mock_session():
 @pytest.fixture
 def app(test_settings, mock_session):
     app = create_app(settings=test_settings)
-    app.dependency_overrides[deps_get_settings] = lambda: test_settings
+    async def override_get_settings():
+        return test_settings
+
+    app.dependency_overrides[deps_get_settings] = override_get_settings
 
     async def override_get_db_session():
         try:
@@ -126,14 +132,17 @@ def app(test_settings, mock_session):
             pass
 
     app.dependency_overrides[get_db_session] = override_get_db_session
-    return app
+    try:
+        yield app
+    finally:
+        app.dependency_overrides.clear()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(app):
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+        yield TaskYieldingASGIClient(ac)
 
 
 # ===========================================================================
@@ -147,7 +156,7 @@ class TestRouteRegistration:
         assert response.status_code != 404
 
     async def test_summary_before_entry_id(self, app):
-        routes = [r.path for r in app.routes if "nutrition-logs" in r.path]
+        routes = [r.path for r in iter_route_contexts(app.routes) if "nutrition-logs" in r.path]
         summary_idx = routes.index("/api/v1/nutrition-logs/summary")
         entry_id_idx = routes.index("/api/v1/nutrition-logs/{entry_id}")
         assert summary_idx < entry_id_idx
@@ -170,7 +179,11 @@ class TestRouteRegistration:
         assert response.status_code != 404
 
     async def test_no_duplicate_summary_path(self, app):
-        summary_routes = [r.path for r in app.routes if r.path == "/api/v1/nutrition-logs/summary"]
+        summary_routes = [
+            r.path
+            for r in iter_route_contexts(app.routes)
+            if r.path == "/api/v1/nutrition-logs/summary"
+        ]
         assert len(summary_routes) == 1
 
 
@@ -1743,7 +1756,7 @@ class TestPhaseBoundary:
     async def test_no_aggregation_route(self, app):
         aggreg_paths = [
             r.path
-            for r in app.routes
+            for r in iter_route_contexts(app.routes)
             if "nutrition-logs" in r.path and "aggregat" in r.path.lower()
         ]
         assert len(aggreg_paths) == 0

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { getSupabaseAccessToken } from './helpers/supabase-session'
 
 const TEST_EMAIL = `dash_${Date.now()}@example.com`
 const TEST_PASSWORD = 'TestPass123!'
@@ -45,15 +46,12 @@ test.describe('Dashboard Layout Visual Inspection', () => {
     console.log('Profile saved')
 
     // STEP 3: Log nutrition data via API
-    const authCookie = await page.evaluate(() => {
-      const token = localStorage.getItem('nutrimind_access_token_backend')
-      return token
-    })
-    console.log('Auth token present:', !!authCookie)
+    const accessToken = await getSupabaseAccessToken(page)
+    console.log('Supabase session token present:', Boolean(accessToken))
 
     // Add nutrition logs via API
     const apiBase = 'http://localhost:8000/api/v1'
-    const headers = { 'Authorization': `Bearer ${authCookie}`, 'Content-Type': 'application/json' }
+    const headers = { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' }
 
     const foods = [
       { meal_type: 'breakfast', food_name: 'Oatmeal with Berries', calories_kcal: 350, protein_g: 12, carbohydrate_g: 55, fat_g: 5 },

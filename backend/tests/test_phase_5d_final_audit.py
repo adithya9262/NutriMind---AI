@@ -202,9 +202,11 @@ class TestSchemaContracts:
 
 class TestApiRouteInventory:
     def _goal_progress_routes(self, app):
+        from fastapi.routing import iter_route_contexts
+
         return [
             r
-            for r in app.routes
+            for r in iter_route_contexts(app.routes)
             if getattr(r, "path", "") == "/api/v1/body-weights/goal-progress"
             and "GET" in getattr(r, "methods", set())
         ]
@@ -289,7 +291,7 @@ class TestOrmMigrationIntegrity:
 
     def test_exactly_five_migrations(self):
         script = ScriptDirectory.from_config(Config(str(ALEMBIC_INI)))
-        assert len(list(script.walk_revisions())) == 7
+        assert len(list(script.walk_revisions())) == 13
 
     def test_one_base_and_linear_chain(self):
         script = ScriptDirectory.from_config(Config(str(ALEMBIC_INI)))
@@ -306,7 +308,7 @@ class TestOrmMigrationIntegrity:
     def test_head_is_correct(self):
         script = ScriptDirectory.from_config(Config(str(ALEMBIC_INI)))
         heads = script.get_heads()
-        assert heads == ["0295723946b2"]
+        assert heads == ["91ac4e3d7b20"]
 
 
 # ===========================================================================

@@ -236,3 +236,114 @@ class TestSecurityModuleAttributes:
         import app.core.security
 
         assert callable(app.core.security.verify_password)
+
+
+class TestRequestIDMiddleware:
+    @pytest.mark.asyncio
+    async def test_valid_request_id_preserved(self):
+        from app.core.middleware import RequestIDMiddleware, get_request_id
+
+        captured_request_id = None
+
+        async def dummy_app(scope, receive, send):
+            nonlocal captured_request_id
+            captured_request_id = get_request_id()
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"OK"})
+
+        middleware = RequestIDMiddleware(dummy_app)
+        sent_messages = []
+
+        async def mock_receive():
+            return {"type": "http.request"}
+
+        async def mock_send(message):
+            sent_messages.append(message)
+
+        scope = {
+            "type": "http",
+            "headers": [(b"x-request-id", b"valid-request-id-123")],
+        }
+        await middleware(scope, mock_receive, mock_send)
+
+        assert captured_request_id == "valid-request-id-123"
+        start_msg = next(m for m in sent_messages if m["type"] == "http.response.start")
+        headers_dict = dict(start_msg["headers"])
+        assert headers_dict[b"x-request-id"] == b"valid-request-id-123"
+
+    @pytest.mark.asyncio
+    async def test_invalid_request_id_replaced_with_uuid(self):
+        from app.core.middleware import RequestIDMiddleware, get_request_id
+
+        captured_request_id = None
+
+        async def dummy_app(scope, receive, send):
+            nonlocal captured_request_id
+            captured_request_id = get_request_id()
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"OK"})
+
+        middleware = RequestIDMiddleware(dummy_app)
+        sent_messages = []
+
+        async def mock_receive():
+            return {"type": "http.request"}
+
+        async def mock_send(message):
+            sent_messages.append(message)
+
+        scope = {
+            "type": "http",
+            "headers": [(b"x-request-id", b"bad\r\ninjection id with spaces!")],
+        }
+        await middleware(scope, mock_receive, mock_send)
+
+        assert captured_request_id != "bad\r\ninjection id with spaces!"
+        assert len(captured_request_id) == 32
+        start_msg = next(m for m in sent_messages if m["type"] == "http.response.start")
+        headers_dict = dict(start_msg["headers"])
+        assert headers_dict[b"x-request-id"] == captured_request_id.encode("latin-1")
+
+    @pytest.mark.asyncio
+    async def test_oversized_request_id_replaced(self):
+        from app.core.middleware import RequestIDMiddleware, get_request_id
+
+        captured_request_id = None
+
+        async def dummy_app(scope, receive, send):
+            nonlocal captured_request_id
+            captured_request_id = get_request_id()
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"OK"})
+
+        middleware = RequestIDMiddleware(dummy_app)
+        sent_messages = []
+
+        async def mock_receive():
+            return {"type": "http.request"}
+
+        async def mock_send(message):
+            sent_messages.append(message)
+
+        scope = {
+            "type": "http",
+            "headers": [(b"x-request-id", (b"a" * 65))],
+        }
+        await middleware(scope, mock_receive, mock_send)
+
+        assert len(captured_request_id) == 32
+
+    @pytest.mark.asyncio
+    async def test_non_http_scope_passthrough(self):
+        from app.core.middleware import RequestIDMiddleware
+
+        called = False
+
+        async def dummy_app(scope, receive, send):
+            nonlocal called
+            called = True
+
+        middleware = RequestIDMiddleware(dummy_app)
+        scope = {"type": "lifespan"}
+        await middleware(scope, None, None)
+        assert called is True

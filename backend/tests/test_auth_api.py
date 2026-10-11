@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import jwt
 import pytest
+import pytest_asyncio
+from fastapi import HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.auth import get_settings
+from app.api.dependencies.authentication import get_current_user
+from app.api.v1.auth import SupabaseSyncRequest, get_settings, supabase_sync
 from app.core.config import Settings
 from app.db.dependencies import get_db_session
 from app.main import create_app
@@ -36,6 +42,7 @@ def _make_user(
     user.password_hash = password_hash
     user.is_active = is_active
     user.is_verified = is_verified
+    user.supabase_user_id = None
     user.created_at = datetime.now(UTC)
     user.updated_at = datetime.now(UTC)
     return user
@@ -87,6 +94,52 @@ def _setup_session_for_user(session: AsyncMock, user: MagicMock) -> None:
     session.refresh = AsyncMock()
 
 
+def _run_isolated_asgi_request(app, method: str, url: str, **kwargs):
+    async def perform_request():
+        async with AsyncClient(
+            transport=ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://test",
+        ) as async_client:
+            request = asyncio.create_task(async_client.request(method, url, **kwargs))
+            await asyncio.sleep(0.1)
+            return await asyncio.wait_for(request, timeout=15)
+
+    return asyncio.run(perform_request())
+
+
+def _effective_route_paths(routes, prefix: str = "") -> list[str]:
+    paths: list[str] = []
+    for route in routes:
+        included_router = getattr(route, "original_router", None)
+        if included_router is not None:
+            context = route.include_context
+            nested_prefix = f"{prefix.rstrip('/')}/{context.prefix.lstrip('/')}"
+            paths.extend(_effective_route_paths(included_router.routes, nested_prefix))
+            continue
+        route_path = getattr(route, "path", None)
+        if route_path is not None:
+            paths.append(f"{prefix.rstrip('/')}/{route_path.lstrip('/')}")
+    return paths
+
+
+class TaskYieldingASGIClient:
+    """Schedule each in-process request separately and bound any transport stall."""
+
+    def __init__(self, async_client: AsyncClient):
+        self.async_client = async_client
+
+    async def request(self, method: str, url: str, **kwargs):
+        request = asyncio.create_task(self.async_client.request(method, url, **kwargs))
+        await asyncio.sleep(0.1)
+        return await asyncio.wait_for(request, timeout=15)
+
+    async def get(self, url: str, **kwargs):
+        return await self.request("GET", url, **kwargs)
+
+    async def post(self, url: str, **kwargs):
+        return await self.request("POST", url, **kwargs)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -98,6 +151,7 @@ def test_settings():
         APP_ENV="test",
         DEBUG=False,
         CORS_ORIGINS="http://test",
+        DATABASE_URL="",
         JWT_SECRET_KEY="test-secret-key-that-is-at-least-32-characters!!",
     )
 
@@ -109,8 +163,12 @@ def mock_session():
 
 @pytest.fixture
 def app(test_settings, mock_session):
-    app = create_app(settings=test_settings)
-    app.dependency_overrides[get_settings] = lambda: test_settings
+    application = create_app(settings=test_settings)
+
+    async def override_get_settings():
+        return test_settings
+
+    application.dependency_overrides[get_settings] = override_get_settings
 
     async def override_get_db_session():
         try:
@@ -118,15 +176,18 @@ def app(test_settings, mock_session):
         finally:
             pass
 
-    app.dependency_overrides[get_db_session] = override_get_db_session
-    return app
+    application.dependency_overrides[get_db_session] = override_get_db_session
+    try:
+        yield application
+    finally:
+        application.dependency_overrides.clear()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(app):
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as async_client:
+        yield TaskYieldingASGIClient(async_client)
 
 
 # ---------------------------------------------------------------------------
@@ -135,46 +196,151 @@ async def client(app):
 
 
 class TestRouteRegistration:
-    async def test_register_path_exists(self, client):
-        response = await client.post("/api/v1/auth/register", json={})
-        assert response.status_code != 404
+    async def test_backend_authentication_still_rejects_missing_bearer_token(
+        self, test_settings, mock_session
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(
+                request=MagicMock(headers={}),
+                credentials=None,
+                session=mock_session,
+                settings=test_settings,
+            )
+        assert exc_info.value.status_code == 401
 
-    async def test_login_path_exists(self, client):
-        response = await client.post("/api/v1/auth/login", json={})
-        assert response.status_code != 404
+    @patch("app.api.dependencies.authentication._verify_via_supabase_api", new_callable=AsyncMock)
+    @patch("app.api.dependencies.authentication.UserRepository")
+    async def test_backend_rejects_unverified_email_when_linking_existing_user(
+        self, mock_repo_class, mock_verify, mock_session
+    ):
+        now = int(datetime.now(UTC).timestamp())
+        supabase_secret = "supabase-test-signing-secret-long-enough"
+        settings = Settings(
+            APP_ENV="test",
+            DEBUG=False,
+            JWT_SECRET_KEY="test-secret-key-that-is-at-least-32-characters!!",
+            SUPABASE_JWT_SECRET=supabase_secret,
+        )
+        supabase_id = uuid.uuid4()
+        token = jwt.encode(
+            {
+                "sub": str(supabase_id),
+                "email": "existing@example.com",
+                "aud": "authenticated",
+                "iat": now,
+                "exp": now + 300,
+            },
+            supabase_secret,
+            algorithm="HS256",
+        )
+        repo = MagicMock()
+        repo.get_by_supabase_id = AsyncMock(return_value=None)
+        repo.get_by_id = AsyncMock(return_value=None)
+        repo.get_by_email = AsyncMock()
+        mock_repo_class.return_value = repo
+        mock_verify.return_value = {
+            "id": str(supabase_id),
+            "email": "existing@example.com",
+            "email_confirmed_at": None,
+        }
 
-    async def test_register_accepts_post(self, client):
-        response = await client.post("/api/v1/auth/register", json={})
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(
+                request=MagicMock(headers={}),
+                credentials=HTTPAuthorizationCredentials(
+                    scheme="Bearer", credentials=token
+                ),
+                session=mock_session,
+                settings=settings,
+            )
+
+        assert exc_info.value.status_code == 401
+        repo.get_by_email.assert_not_awaited()
+
+    @patch("app.api.dependencies.authentication.UserRepository")
+    async def test_supabase_identity_cannot_fall_back_to_conflicting_local_id(
+        self, mock_repo_class, mock_session
+    ):
+        now = int(datetime.now(UTC).timestamp())
+        supabase_secret = "supabase-test-signing-secret-long-enough"
+        settings = Settings(
+            APP_ENV="test",
+            DEBUG=False,
+            JWT_SECRET_KEY="test-secret-key-that-is-at-least-32-characters!!",
+            SUPABASE_JWT_SECRET=supabase_secret,
+        )
+        supabase_id = uuid.uuid4()
+        token = jwt.encode(
+            {
+                "sub": str(supabase_id),
+                "email": "new-identity@example.com",
+                "aud": "authenticated",
+                "iat": now,
+                "exp": now + 300,
+            },
+            supabase_secret,
+            algorithm="HS256",
+        )
+        local_user = _make_user()
+        local_user.id = supabase_id
+        local_user.supabase_user_id = uuid.uuid4()
+        repo = MagicMock()
+        repo.get_by_supabase_id = AsyncMock(return_value=None)
+        repo.get_by_id = AsyncMock(return_value=local_user)
+        mock_repo_class.return_value = repo
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(
+                request=MagicMock(headers={}),
+                credentials=HTTPAuthorizationCredentials(
+                    scheme="Bearer", credentials=token
+                ),
+                session=mock_session,
+                settings=settings,
+            )
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail["error"]["code"] == "IDENTITY_CONFLICT"
+        mock_session.commit.assert_not_awaited()
+
+    def test_register_path_exists(self, app):
+        response = _run_isolated_asgi_request(app, "POST", "/api/v1/auth/register", json={})
         assert response.status_code == 422
 
-    async def test_login_accepts_post(self, client):
-        response = await client.post("/api/v1/auth/login", json={})
+    def test_login_path_exists(self, app):
+        response = _run_isolated_asgi_request(app, "POST", "/api/v1/auth/login", json={})
         assert response.status_code == 422
 
-    async def test_register_rejects_get(self, client):
-        response = await client.get("/api/v1/auth/register")
+    def test_register_accepts_post(self, app):
+        response = _run_isolated_asgi_request(app, "POST", "/api/v1/auth/register", json={})
+        assert response.status_code == 422
+
+    def test_login_accepts_post(self, app):
+        response = _run_isolated_asgi_request(app, "POST", "/api/v1/auth/login", json={})
+        assert response.status_code == 422
+
+    def test_register_rejects_get(self, app):
+        response = _run_isolated_asgi_request(app, "GET", "/api/v1/auth/register")
         assert response.status_code == 405
 
-    async def test_login_rejects_get(self, client):
-        response = await client.get("/api/v1/auth/login")
+    def test_login_rejects_get(self, app):
+        response = _run_isolated_asgi_request(app, "GET", "/api/v1/auth/login")
         assert response.status_code == 405
 
-    async def test_health_path_remains(self, client):
-        transport = ASGITransport(app=create_app(Settings(APP_ENV="test", DEBUG=False)))
-        async with AsyncClient(transport=transport, base_url="http://test") as c:
-            response = await c.get("/api/v1/health")
+    def test_health_path_remains(self, app):
+        response = _run_isolated_asgi_request(app, "GET", "/api/v1/health")
         assert response.status_code == 200
 
-    async def test_no_auth_route_outside_api_v1(self, client):
-        response = await client.post("/auth/register", json={})
+    def test_no_auth_route_outside_api_v1(self, app):
+        response = _run_isolated_asgi_request(app, "POST", "/auth/register", json={})
         assert response.status_code == 404
 
-    async def test_no_logout_route(self, client):
-        response = await client.post("/api/v1/auth/logout")
+    def test_no_logout_route(self, app):
+        response = _run_isolated_asgi_request(app, "POST", "/api/v1/auth/logout")
         assert response.status_code == 405 or response.status_code == 404
 
-    async def test_auth_me_route_exists(self, client):
-        response = await client.get("/api/v1/auth/me")
+    def test_auth_me_route_exists(self, app):
+        response = _run_isolated_asgi_request(app, "GET", "/api/v1/auth/me")
         assert response.status_code != 404
 
 
@@ -1141,13 +1307,11 @@ class TestAppFactory:
     def test_auth_routes_registered_exactly_once(self):
         settings = Settings(APP_ENV="test", DEBUG=False)
         app = create_app(settings=settings)
-        routes = [
-            (r.path, list(r.methods or {"GET"}))
-            for r in app.routes
-            if hasattr(r, "path") and "/auth" in r.path
+        routes = _effective_route_paths(app.routes)
+        register_routes = [
+            path for path in routes if path == settings.API_V1_PREFIX + "/auth/register"
         ]
-        register_routes = [r for r in routes if r[0] == settings.API_V1_PREFIX + "/auth/register"]
-        login_routes = [r for r in routes if r[0] == settings.API_V1_PREFIX + "/auth/login"]
+        login_routes = [path for path in routes if path == settings.API_V1_PREFIX + "/auth/login"]
         assert len(register_routes) == 1
         assert len(login_routes) == 1
 
@@ -1299,9 +1463,162 @@ class TestRegisterOAuthAccount:
 class TestSyncSupabaseUserPreservesCredentials:
     """sync_supabase_user must never overwrite existing password credentials."""
 
-    async def test_sync_with_existing_password_user_returns_unchanged(self, app, client, mock_session):
+    @patch("app.api.v1.auth.verify_supabase_token", new_callable=AsyncMock, return_value=None)
+    async def test_sync_rejects_jwt_without_verified_supabase_identity(
+        self, mock_verifier, test_settings, mock_session
+    ):
+        forged_token = jwt.encode(
+            {
+                "sub": str(uuid.uuid4()),
+                "email": "victim@example.com",
+                "exp": int(datetime.now(UTC).timestamp()) + 300,
+            },
+            "attacker-controlled-signing-key-000000",
+            algorithm="HS256",
+        )
+
+        response = await supabase_sync(
+            request=MagicMock(),
+            body=SupabaseSyncRequest(access_token=forged_token),
+            session=mock_session,
+            settings=test_settings,
+        )
+
+        assert response.status_code == 401
+        body = json.loads(response.body)
+        assert body["error"]["code"] == "INVALID_SUPABASE_TOKEN"
+        mock_session.execute.assert_not_awaited()
+        mock_verifier.assert_awaited_once()
+
+    @patch("app.api.v1.auth.verify_supabase_token", new_callable=AsyncMock, return_value=None)
+    async def test_sync_rejects_expired_supabase_token(
+        self, mock_verifier, test_settings, mock_session
+    ):
+        expired_token = jwt.encode(
+            {
+                "sub": str(uuid.uuid4()),
+                "email": "person@example.com",
+                "exp": int(datetime.now(UTC).timestamp()) - 1,
+            },
+            "attacker-controlled-signing-key-000000",
+            algorithm="HS256",
+        )
+        response = await supabase_sync(
+            request=MagicMock(),
+            body=SupabaseSyncRequest(access_token=expired_token),
+            session=mock_session,
+            settings=test_settings,
+        )
+        assert response.status_code == 401
+        mock_session.execute.assert_not_awaited()
+        mock_verifier.assert_awaited_once()
+
+    @patch("app.api.v1.auth.verify_supabase_token", new_callable=AsyncMock)
+    async def test_sync_rejects_unverified_email_before_database_access(
+        self, mock_verifier, test_settings, mock_session
+    ):
+        mock_verifier.return_value = {
+            "id": str(uuid.uuid4()),
+            "email": "victim@example.com",
+            "email_confirmed_at": None,
+        }
+        response = await supabase_sync(
+            request=MagicMock(),
+            body=SupabaseSyncRequest(access_token="valid-but-unverified"),
+            session=mock_session,
+            settings=test_settings,
+        )
+        assert response.status_code == 403
+        assert json.loads(response.body)["error"]["code"] == "EMAIL_NOT_VERIFIED"
+        mock_session.execute.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "identity, expected_status, expected_code",
+        [
+            ({"id": str(uuid.uuid4()), "email_confirmed_at": "now"}, 400, "MISSING_EMAIL"),
+            (
+                {
+                    "id": str(uuid.uuid4()),
+                    "email": "person@example.com",
+                    "email_confirmed_at": False,
+                },
+                403,
+                "EMAIL_NOT_VERIFIED",
+            ),
+            (
+                {"email": "person@example.com", "email_confirmed_at": "now"},
+                401,
+                "INVALID_SUPABASE_IDENTITY",
+            ),
+            ({"id": str(uuid.uuid4()), "email": "person@example.com"}, 403, "EMAIL_NOT_VERIFIED"),
+        ],
+    )
+    @patch("app.api.v1.auth.verify_supabase_token", new_callable=AsyncMock)
+    async def test_sync_rejects_incomplete_identity(
+        self, mock_verifier, identity, expected_status, expected_code, test_settings, mock_session
+    ):
+        mock_verifier.return_value = identity
+        response = await supabase_sync(
+            request=MagicMock(),
+            body=SupabaseSyncRequest(access_token="supabase-token"),
+            session=mock_session,
+            settings=test_settings,
+        )
+        assert response.status_code == expected_status
+        assert json.loads(response.body)["error"]["code"] == expected_code
+        mock_session.execute.assert_not_awaited()
+
+    @patch("app.api.v1.auth.verify_supabase_token", new_callable=AsyncMock)
+    async def test_sync_links_verified_email_and_records_supabase_identity(
+        self, mock_verifier, client, mock_session
+    ):
+        supabase_id = uuid.uuid4()
+        mock_verifier.return_value = {
+            "id": str(supabase_id),
+            "email": "test@example.com",
+            "email_confirmed_at": "2026-10-11T00:00:00Z",
+        }
+        user = _make_user(email="test@example.com")
+        _setup_session_for_user(mock_session, user)
+        response = await client.post(
+            "/api/v1/auth/supabase-sync",
+            json={"access_token": "verified-token"},
+        )
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+        assert user.supabase_user_id == supabase_id
+        assert user.is_verified is True
+
+    @patch("app.api.v1.auth.verify_supabase_token", new_callable=AsyncMock)
+    async def test_sync_rejects_conflicting_supabase_identity(
+        self, mock_verifier, client, mock_session
+    ):
+        mock_verifier.return_value = {
+            "id": str(uuid.uuid4()),
+            "email": "test@example.com",
+            "email_confirmed_at": "2026-10-11T00:00:00Z",
+        }
+        user = _make_user(email="test@example.com")
+        user.supabase_user_id = uuid.uuid4()
+        _setup_session_for_user(mock_session, user)
+        response = await client.post(
+            "/api/v1/auth/supabase-sync",
+            json={"access_token": "conflicting-token"},
+        )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "IDENTITY_CONFLICT"
+
+    @patch("app.api.v1.auth.verify_supabase_token", new_callable=AsyncMock)
+    async def test_sync_with_existing_password_user_returns_unchanged(
+        self, mock_verifier, app, client, mock_session
+    ):
         original_hash = "$argon2id$v=19$m=65536,t=3,p=4$realhash"
         user = _make_user(password_hash=original_hash)
+        mock_verifier.return_value = {
+            "id": str(uuid.uuid4()),
+            "email": user.email,
+            "email_confirmed_at": "2026-10-11T00:00:00Z",
+        }
         result_mock = MagicMock()
         result_mock.scalars.return_value.first.return_value = user
         mock_session.execute = AsyncMock(return_value=result_mock)
@@ -1310,14 +1627,22 @@ class TestSyncSupabaseUserPreservesCredentials:
         mock_session.commit = AsyncMock()
         mock_session.rollback = AsyncMock()
         mock_session.refresh = AsyncMock()
-        response = await client.post(
+        await client.post(
             "/api/v1/auth/supabase-sync",
             json={"access_token": "some-token"},
         )
         assert user.password_hash == original_hash
 
-    async def test_sync_with_existing_oauth_user_returns_unchanged(self, app, client, mock_session):
+    @patch("app.api.v1.auth.verify_supabase_token", new_callable=AsyncMock)
+    async def test_sync_with_existing_oauth_user_returns_unchanged(
+        self, mock_verifier, app, client, mock_session
+    ):
         user = _make_user(password_hash=SUPABASE_PASSWORD_SENTINEL)
+        mock_verifier.return_value = {
+            "id": str(uuid.uuid4()),
+            "email": user.email,
+            "email_confirmed_at": "2026-10-11T00:00:00Z",
+        }
         result_mock = MagicMock()
         result_mock.scalars.return_value.first.return_value = user
         mock_session.execute = AsyncMock(return_value=result_mock)
@@ -1326,7 +1651,7 @@ class TestSyncSupabaseUserPreservesCredentials:
         mock_session.commit = AsyncMock()
         mock_session.rollback = AsyncMock()
         mock_session.refresh = AsyncMock()
-        response = await client.post(
+        await client.post(
             "/api/v1/auth/supabase-sync",
             json={"access_token": "some-token"},
         )

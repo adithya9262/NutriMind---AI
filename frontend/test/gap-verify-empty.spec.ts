@@ -23,7 +23,7 @@ test('vertical gap verification empty state', async ({ page }) => {
   await page.waitForTimeout(3000)
 
   const measure = await page.evaluate(() => {
-    const getY = (selector) => {
+    const getY = (selector: string) => {
       const el = document.querySelector(selector)
       if (!el) return null
       return Math.round(el.getBoundingClientRect().bottom)

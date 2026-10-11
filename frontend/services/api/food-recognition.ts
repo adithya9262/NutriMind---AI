@@ -9,7 +9,7 @@ export async function analyzeFoodImage(file: File) {
     process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") || "http://localhost:8001"
   const url = `${baseUrl}/food-recognition/analyze`
 
-  const token = getAccessToken("supabase") || getAccessToken("backend")
+  const token = await getAccessToken()
 
   const response = await fetch(url, {
     method: "POST",

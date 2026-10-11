@@ -1438,7 +1438,7 @@ class TestPhaseBoundaries:
 
         migration_dir = "alembic/versions"
         files = [f for f in os.listdir(migration_dir) if f.endswith(".py") and f != "__init__.py"]
-        assert len(files) == 7
+        assert len(files) == 13
 
     def test_migration_head_unchanged(self):
         from alembic.config import Config
@@ -1446,7 +1446,7 @@ class TestPhaseBoundaries:
 
         alembic_cfg = Config("alembic.ini")
         script = ScriptDirectory.from_config(alembic_cfg)
-        assert script.get_current_head() == "0295723946b2"
+        assert script.get_current_head() == "91ac4e3d7b20"
 
     def test_no_goal_orm_model(self):
         import os

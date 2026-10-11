@@ -62,6 +62,7 @@ test('debug all API responses on Food Diary, Tasks, Weight', async ({ page }) =>
 
   // Check what's visible
   const pageContent = await page.locator('body').textContent().catch(() => 'NO_CONTENT')
+  if (pageContent === null) throw new Error('Food diary page body was unavailable')
   const hasRetry = pageContent.includes('Retry')
   const hasEntryForm = pageContent.includes('Add Entry') || pageContent.includes('New Food Entry')
   const hasNoEntries = pageContent.includes('No entries logged')
@@ -83,6 +84,7 @@ test('debug all API responses on Food Diary, Tasks, Weight', async ({ page }) =>
   await page.goto('/tasks', { waitUntil: 'domcontentloaded', timeout: 30000 })
   await page.waitForTimeout(5000)
   const tasksContent = await page.locator('body').textContent().catch(() => 'NO_CONTENT')
+  if (tasksContent === null) throw new Error('Tasks page body was unavailable')
   const tasksRetry = tasksContent.includes('Retry')
   console.log(`Tasks has Retry: ${tasksRetry}`)
   await page.screenshot({ path: '../test-results/debug-tasks.png', fullPage: true })
@@ -91,6 +93,7 @@ test('debug all API responses on Food Diary, Tasks, Weight', async ({ page }) =>
   await page.goto('/body-weight', { waitUntil: 'domcontentloaded', timeout: 30000 })
   await page.waitForTimeout(5000)
   const weightContent = await page.locator('body').textContent().catch(() => 'NO_CONTENT')
+  if (weightContent === null) throw new Error('Body weight page body was unavailable')
   const weightRetry = weightContent.includes('Retry')
   console.log(`Weight has Retry: ${weightRetry}`)
   await page.screenshot({ path: '../test-results/debug-weight.png', fullPage: true })

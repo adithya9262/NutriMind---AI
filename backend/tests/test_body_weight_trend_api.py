@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -96,8 +98,12 @@ def mock_session():
 
 @pytest.fixture
 def app(test_settings, mock_session):
-    app = create_app(settings=test_settings)
-    app.dependency_overrides[deps_get_settings] = lambda: test_settings
+    application = create_app(settings=test_settings)
+
+    async def override_get_settings():
+        return test_settings
+
+    application.dependency_overrides[deps_get_settings] = override_get_settings
 
     async def override_get_db_session():
         try:
@@ -105,15 +111,43 @@ def app(test_settings, mock_session):
         finally:
             pass
 
-    app.dependency_overrides[get_db_session] = override_get_db_session
-    return app
+    application.dependency_overrides[get_db_session] = override_get_db_session
+    try:
+        yield application
+    finally:
+        application.dependency_overrides.clear()
 
 
-@pytest.fixture
+class TaskYieldingASGIClient:
+    def __init__(self, async_client: AsyncClient):
+        self.async_client = async_client
+
+    async def request(self, method: str, url: str, **kwargs):
+        request = asyncio.create_task(self.async_client.request(method, url, **kwargs))
+        await asyncio.sleep(0.1)
+        return await asyncio.wait_for(request, timeout=15)
+
+    async def get(self, url: str, **kwargs):
+        return await self.request("GET", url, **kwargs)
+
+    async def post(self, url: str, **kwargs):
+        return await self.request("POST", url, **kwargs)
+
+    async def put(self, url: str, **kwargs):
+        return await self.request("PUT", url, **kwargs)
+
+    async def patch(self, url: str, **kwargs):
+        return await self.request("PATCH", url, **kwargs)
+
+    async def delete(self, url: str, **kwargs):
+        return await self.request("DELETE", url, **kwargs)
+
+
+@pytest_asyncio.fixture
 async def client(app):
     transport = ASGITransport(app=app, raise_app_exceptions=False)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    async with AsyncClient(transport=transport, base_url="http://test") as async_client:
+        yield TaskYieldingASGIClient(async_client)
 
 
 # ===========================================================================
@@ -127,20 +161,23 @@ class TestRouteRegistration:
         assert response.status_code != 404
 
     async def test_route_registered_exactly_once(self, app):
+        from app.api.v1.body_weights import router
+
         trend_routes = [
             r
-            for r in app.routes
-            if getattr(r, "path", "") == "/api/v1/body-weights/trend"
+            for r in router.routes
+            if getattr(r, "path", "") == "/body-weights/trend"
             and hasattr(r, "methods")
             and "GET" in r.methods
         ]
         assert len(trend_routes) == 1
 
     async def test_static_trend_not_shadowed(self, app):
-        trend_routes = [
-            r for r in app.routes if getattr(r, "path", "") == "/api/v1/body-weights/trend"
-        ]
-        assert len(trend_routes) == 1
+        from app.api.v1.body_weights import router
+
+        paths = [getattr(r, "path", "") for r in router.routes]
+        assert paths.count("/body-weights/trend") == 1
+        assert paths.index("/body-weights/trend") < paths.index("/body-weights/{entry_id}")
 
     async def test_route_on_existing_body_weight_router(self, app):
         from app.api.v1.body_weights import router
@@ -173,8 +210,10 @@ class TestRouteRegistration:
         assert response.status_code in (404, 405, 401)
 
     async def test_existing_body_weight_routes_unchanged(self, app):
-        bw_paths: set[str] = {
-            r.path for r in app.routes if "body-weight" in r.path or "body_weight" in r.path
+        bw_paths = {
+            path
+            for path in app.openapi()["paths"]
+            if "body-weight" in path or "body_weight" in path
         }
         assert "/api/v1/body-weights" in bw_paths
         assert "/api/v1/body-weights/trend" in bw_paths

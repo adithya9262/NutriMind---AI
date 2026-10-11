@@ -6,7 +6,6 @@ import Link from "next/link"
 import { motion } from "framer-motion"
 import { useAuth } from "@/contexts/auth-context"
 import { registerUser } from "@/services/api/auth"
-import { setAccessToken } from "@/lib/token-storage"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { FormField } from "@/components/ui/form-field"
@@ -26,6 +25,7 @@ export default function RegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
+  const [notice, setNotice] = useState("")
   const [loading, setLoading] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<{
     email?: string
@@ -53,6 +53,7 @@ export default function RegisterPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError("")
+    setNotice("")
     if (!validate()) return
 
     setLoading(true)
@@ -69,9 +70,10 @@ export default function RegisterPage() {
           setError(result.error?.message || "Registration failed. Please try again.")
         }
       } else if (result.data) {
-        // Store the backend token and set a session cookie for the middleware
-        setAccessToken(result.data.access_token, "backend")
-        document.cookie = `nutrimind_session=1; path=/; max-age=86400; SameSite=Lax`
+        if (!result.data.access_token) {
+          setNotice("Check your email for a verification link before signing in.")
+          return
+        }
         await refreshSession()
         router.push("/dashboard?welcome=true")
       }
@@ -133,6 +135,11 @@ export default function RegisterPage() {
             <Divider className="mb-5">Or create with email</Divider>
 
             <form onSubmit={handleSubmit} noValidate className="space-y-5">
+              {notice && (
+                <Alert variant="success">
+                  {notice}
+                </Alert>
+              )}
               {error && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}>
                   <Alert variant="error" dismissible onDismiss={() => setError("")}>

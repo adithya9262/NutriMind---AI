@@ -80,14 +80,16 @@ Reusable primitives live in `components/ui/`; feature components live in per-fea
 
 ## Authentication flow
 
-1. `AuthProvider` (mounted in root layout) reads the token via `lib/token-storage.ts`
-   (`localStorage`) and, if present, calls `fetchCurrentUser`.
+1. `AuthProvider` (mounted in root layout) asks Supabase Auth to validate and restore the
+   session persisted by `@supabase/ssr` cookies.
 2. `ProtectedRoute` renders a loading spinner while `state === "loading"`, `null` while
    redirecting, and children once `authenticated`. Unauthenticated users are pushed to
    `/login?redirect=<path>` (redirect validated to start with `/` and not `//`).
-3. Login/Register call `services/api/auth.ts`, store the token + user, and redirect.
-4. Logout clears the token and context state.
-5. The API client injects `Authorization: Bearer <token>` on authenticated requests.
+3. Email and OAuth login/register use Supabase Auth; registration may require email
+   confirmation before a session is issued.
+4. Logout calls Supabase `signOut` and clears the auth context.
+5. API calls read the current Supabase session through the Supabase client and send its
+   bearer token. Backend authorization remains independent and required.
 
 ## API layer
 
@@ -95,7 +97,7 @@ Reusable primitives live in `components/ui/`; feature components live in per-fea
 
 - Reads `NEXT_PUBLIC_API_URL`.
 - 8-second `AbortController` timeout.
-- Injects the Bearer token from `getAccessToken()`.
+- Injects the current bearer token from the Supabase-managed session.
 - Parses the backend success/error envelope (`{ success, message, data, error }`).
 - Handles network errors and invalid JSON safely; 401 surfaces for future auth-error dispatch.
 
@@ -107,8 +109,8 @@ Per-feature services wrap the client: `auth.ts`, `body-weight.ts`, `nutrition-lo
 - **Global:** `AuthProvider` context (`state`, `user`, `login`, `logout`).
 - **Feature:** custom hooks (`hooks/use-*.ts`) own loading/empty/error/retry state and
   stale-request protection (fetch-counter / AbortController refs). No global store library.
-- **Persistence:** only the auth token is persisted (localStorage). No feature data is
-  stored client-side.
+- **Persistence:** Supabase SSR persists session cookies. Feature data is not stored in
+  custom client-side persistence; the SDK's session cookie is browser-readable for refresh.
 
 ## Folder organization
 

@@ -91,7 +91,7 @@ class TestTaskMigrationGraph:
         config = Config(str(ALEMBIC_INI))
         script = ScriptDirectory.from_config(config)
         heads = script.get_heads()
-        assert heads[0] == "0295723946b2"
+        assert heads[0] == "91ac4e3d7b20"
 
     def test_base_is_original_baseline(self):
         config = Config(str(ALEMBIC_INI))

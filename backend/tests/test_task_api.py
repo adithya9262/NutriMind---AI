@@ -5,6 +5,8 @@ from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
+from fastapi.routing import iter_route_contexts
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +18,7 @@ from app.db.dependencies import get_db_session
 from app.main import create_app
 from app.models.task import Task as TaskORM
 from app.models.user import User
+from tests.asgi_client import TaskYieldingASGIClient
 
 VALID_COMPLETED_AT = "2026-07-12T10:00:00Z"
 NOW = datetime.now(UTC)
@@ -73,7 +76,7 @@ def _make_result(*, one_or_none=None, all_value=None) -> MagicMock:
 
 
 def _setup_create_session(mock_session: AsyncMock, user: MagicMock) -> None:
-    
+
     mock_session.execute = AsyncMock(return_value=_make_result(one_or_none=user))
     mock_session.commit = AsyncMock()
     mock_session.rollback = AsyncMock()
@@ -93,7 +96,7 @@ def _setup_two_execute_session(
     task_result = (
         _make_result(all_value=task_value) if as_list else _make_result(one_or_none=task_value)
     )
-    
+
     mock_session.execute = AsyncMock(side_effect=[auth_result, task_result])
     mock_session.commit = AsyncMock()
     mock_session.rollback = AsyncMock()
@@ -137,7 +140,10 @@ def mock_session() -> AsyncMock:
 @pytest.fixture
 def app(test_settings, mock_session):
     application = create_app(settings=test_settings)
-    application.dependency_overrides[deps_get_settings] = lambda: test_settings
+    async def override_get_settings():
+        return test_settings
+
+    application.dependency_overrides[deps_get_settings] = override_get_settings
 
     async def override_get_db_session():
         try:
@@ -146,14 +152,17 @@ def app(test_settings, mock_session):
             pass
 
     application.dependency_overrides[get_db_session] = override_get_db_session
-    return application
+    try:
+        yield application
+    finally:
+        application.dependency_overrides.clear()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(app):
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+        yield TaskYieldingASGIClient(ac)
 
 
 def _auth_header(token: str | None) -> dict[str, str]:
@@ -167,11 +176,11 @@ def _auth_header(token: str | None) -> dict[str, str]:
 
 class TestRouteRegistration:
     async def test_router_exists(self, app):
-        paths = [r.path for r in app.routes if "tasks" in r.path]
+        paths = [r.path for r in iter_route_contexts(app.routes) if "tasks" in r.path]
         assert len(paths) > 0
 
     async def test_paths_registered(self, app):
-        task_paths = {r.path for r in app.routes if "tasks" in r.path}
+        task_paths = {r.path for r in iter_route_contexts(app.routes) if "tasks" in r.path}
         assert task_paths == {
             "/api/v1/tasks",
             "/api/v1/tasks/{task_id}",
@@ -209,13 +218,16 @@ class TestRouteRegistration:
     async def test_no_extra_post_endpoint(self, app):
         post_paths = [
             r.path
-            for r in app.routes
+            for r in iter_route_contexts(app.routes)
             if "tasks" in r.path and hasattr(r, "methods") and "POST" in r.methods
         ]
         assert len(post_paths) == 3
 
     async def test_no_user_id_path(self, app):
-        paths = [r.path for r in app.routes if "users/" in r.path and "tasks" in r.path]
+        paths = [
+            r.path for r in iter_route_contexts(app.routes)
+            if "users/" in r.path and "tasks" in r.path
+        ]
         assert len(paths) == 0
 
     async def test_no_put_endpoint(self, client):
@@ -227,7 +239,7 @@ class TestRouteRegistration:
         assert response.status_code == 405
 
     async def test_registered_exactly_once(self, app):
-        task_paths = {r.path for r in app.routes if "tasks" in r.path}
+        task_paths = {r.path for r in iter_route_contexts(app.routes) if "tasks" in r.path}
         assert task_paths == {
             "/api/v1/tasks",
             "/api/v1/tasks/{task_id}",
@@ -263,7 +275,7 @@ class TestRouteOrdering:
         assert response.status_code != 404
 
     async def test_static_before_dynamic(self, app):
-        task_paths = sorted(r.path for r in app.routes if "tasks" in r.path)
+        task_paths = sorted(r.path for r in iter_route_contexts(app.routes) if "tasks" in r.path)
         assert task_paths[0] == "/api/v1/tasks"
         assert "/api/v1/tasks/{task_id}" in task_paths
 

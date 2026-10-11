@@ -160,7 +160,6 @@ def downgrade() -> None:
 
     op.execute(sa.text("DROP TYPE IF EXISTS goal_status"))
     op.execute(sa.text("DROP TYPE IF EXISTS goal_type"))
-    op.execute(sa.text("DROP TYPE IF EXISTS fitness_goal"))
 
     op.drop_column("nutrition_profiles", "daily_fat_goal_g")
     op.drop_column("nutrition_profiles", "daily_carb_goal_g")
@@ -173,3 +172,6 @@ def downgrade() -> None:
     op.drop_column("nutrition_profiles", "avatar_url")
     op.drop_column("nutrition_profiles", "phone")
     op.drop_column("nutrition_profiles", "full_name")
+
+    op.execute(sa.text("DROP TYPE IF EXISTS fitness_goal"))
+

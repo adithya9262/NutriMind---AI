@@ -57,16 +57,11 @@ describe("NutritionProfileForm", () => {
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 
-  it("shows validation errors when submitting empty form", async () => {
+  it("allows creating an incomplete profile", async () => {
     const user = userEvent.setup();
     render(<NutritionProfileForm loading={false} error={null} onSubmit={mockOnSubmit} />);
     await user.click(screen.getByRole("button", { name: "Create Profile" }));
-    expect(screen.getByText("Date of birth is required.")).toBeInTheDocument();
-    expect(screen.getByText("Biological sex is required.")).toBeInTheDocument();
-    expect(screen.getByText("Height is required.")).toBeInTheDocument();
-    expect(screen.getByText("Weight is required.")).toBeInTheDocument();
-    expect(screen.getByText("Activity level is required.")).toBeInTheDocument();
-    expect(screen.getByText("Goal is required.")).toBeInTheDocument();
+    expect(mockOnSubmit).toHaveBeenCalledWith({});
   });
 
   it("shows height validation error for out-of-range value", async () => {

@@ -32,7 +32,14 @@ security_scheme = HTTPBearer(
 # because the underlying session is closed after each request.
 
 
-def _raise_http(status_code: int, code: str, message: str, request_id: str, *, www_auth: bool = True) -> HTTPException:
+def _raise_http(
+    status_code: int,
+    code: str,
+    message: str,
+    request_id: str,
+    *,
+    www_auth: bool = True,
+) -> HTTPException:
     headers: dict[str, str] = {"X-Request-ID": request_id}
     if www_auth:
         headers["WWW-Authenticate"] = "Bearer"
@@ -152,6 +159,7 @@ async def get_current_user(
 
     token_str = credentials.credentials
     payload: dict | None = None
+    is_backend_token = False
 
     try:
         payload = _decode_supabase_jwt(token_str, settings)
@@ -169,7 +177,10 @@ async def get_current_user(
                 status.HTTP_401_UNAUTHORIZED, "ACCESS_TOKEN_EXPIRED",
                 "The access token has expired.", request_id,
             )
+        else:
+            is_backend_token = payload is not None
 
+    supabase_data: dict | None = None
     if payload is None and settings.SUPABASE_URL and settings.SUPABASE_ANON_KEY:
         supabase_data = await _verify_via_supabase_api(token_str, settings)
         if supabase_data:
@@ -195,7 +206,7 @@ async def get_current_user(
 
     try:
         user_uuid = uuid.UUID(supabase_user_id)
-    except ValueError:
+    except (TypeError, ValueError):
         raise _raise_http(
             status.HTTP_401_UNAUTHORIZED, "INVALID_ACCESS_TOKEN",
             "The access token is invalid.", request_id,
@@ -203,23 +214,70 @@ async def get_current_user(
 
     repo = UserRepository(session)
 
-    user = await repo.get_by_id(user_uuid)
-    if user is None and email:
-        user = await repo.get_by_email(email)
+    if is_backend_token:
+        user = await repo.get_by_id(user_uuid)
+    else:
+        user = await repo.get_by_supabase_id(user_uuid)
+        if user is None:
+            # Older synced accounts used the Supabase UUID as the local ID.
+            user = await repo.get_by_id(user_uuid)
+            if user is not None:
+                if user.supabase_user_id not in (None, user_uuid):
+                    raise _raise_http(
+                        status.HTTP_403_FORBIDDEN,
+                        "IDENTITY_CONFLICT",
+                        "This identity cannot access the requested account.",
+                        request_id,
+                    )
+                if user.supabase_user_id is None:
+                    user.supabase_user_id = user_uuid
+                    await session.commit()
+
+        if user is None:
+            # Email linking requires an authoritative Supabase user response.
+            # A signed JWT alone does not reliably carry email verification status.
+            if supabase_data is None:
+                supabase_data = await _verify_via_supabase_api(token_str, settings)
+            verified_id = (supabase_data or {}).get("id")
+            verified_email = str((supabase_data or {}).get("email") or "").strip().lower()
+            email_confirmed = bool((supabase_data or {}).get("email_confirmed_at"))
+            if (
+                not verified_id
+                or verified_id != str(user_uuid)
+                or not email
+                or verified_email != email
+                or not email_confirmed
+            ):
+                raise _raise_http(
+                    status.HTTP_401_UNAUTHORIZED, "INVALID_ACCESS_TOKEN",
+                    "The access token is invalid.", request_id,
+                )
+
+            user = await repo.get_by_email(verified_email)
+            if user is not None:
+                if user.supabase_user_id not in (None, user_uuid):
+                    raise _raise_http(
+                        status.HTTP_403_FORBIDDEN, "IDENTITY_CONFLICT",
+                        "This identity cannot access the requested account.", request_id,
+                    )
+                user.supabase_user_id = user_uuid
+                user.is_verified = True
+                await session.commit()
+            else:
+                user = await repo.create(
+                    email=verified_email,
+                    password_hash=SUPABASE_PASSWORD_SENTINEL,
+                    user_id=user_uuid,
+                    supabase_user_id=user_uuid,
+                )
+                user.is_verified = True
+                await session.commit()
 
     if user is None:
-        if email:
-            user = await repo.create(
-                email=email,
-                password_hash=SUPABASE_PASSWORD_SENTINEL,
-                user_id=user_uuid,
-            )
-            await session.commit()
-        else:
-            raise _raise_http(
-                status.HTTP_401_UNAUTHORIZED, "INVALID_ACCESS_TOKEN",
-                "The access token is invalid.", request_id,
-            )
+        raise _raise_http(
+            status.HTTP_401_UNAUTHORIZED, "INVALID_ACCESS_TOKEN",
+            "The access token is invalid.", request_id,
+        )
 
     if not user.is_active:
         raise _raise_http(

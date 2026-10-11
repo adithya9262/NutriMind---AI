@@ -16,6 +16,7 @@ from pathlib import Path
 import sqlalchemy as sa
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from fastapi.routing import iter_route_contexts
 
 from app.core.body_weight import (
     BODY_WEIGHT_DECIMAL_PLACES,
@@ -187,9 +188,7 @@ class TestApiRouteInventory:
     def test_exactly_three_body_weight_methods(self):
         app = create_app()
         bw_routes = []
-        for route in app.routes:
-            if not hasattr(route, "path"):
-                continue
+        for route in iter_route_contexts(app.routes):
             if "body-weight" not in route.path and "body_weight" not in route.path:
                 continue
             for method in getattr(route, "methods", set()) or set():
@@ -206,9 +205,7 @@ class TestApiRouteInventory:
 
     def test_no_get_by_id(self):
         app = create_app()
-        for route in app.routes:
-            if not hasattr(route, "path") or not hasattr(route, "methods"):
-                continue
+        for route in iter_route_contexts(app.routes):
             if "body-weight" not in route.path and "body_weight" not in route.path:
                 continue
             if "GET" in (route.methods or set()) and "{entry_id}" in route.path:
@@ -216,9 +213,7 @@ class TestApiRouteInventory:
 
     def test_no_patch(self):
         app = create_app()
-        for route in app.routes:
-            if not hasattr(route, "path") or not hasattr(route, "methods"):
-                continue
+        for route in iter_route_contexts(app.routes):
             if "body-weight" not in route.path and "body_weight" not in route.path:
                 continue
             if "PATCH" in (route.methods or set()):
@@ -226,9 +221,7 @@ class TestApiRouteInventory:
 
     def test_no_put(self):
         app = create_app()
-        for route in app.routes:
-            if not hasattr(route, "path") or not hasattr(route, "methods"):
-                continue
+        for route in iter_route_contexts(app.routes):
             if "body-weight" not in route.path and "body_weight" not in route.path:
                 continue
             if "PUT" in (route.methods or set()):
@@ -236,9 +229,7 @@ class TestApiRouteInventory:
 
     def test_no_summary_progress_trend_analytics(self):
         app = create_app()
-        for route in app.routes:
-            if not hasattr(route, "path"):
-                continue
+        for route in iter_route_contexts(app.routes):
             p = route.path.lower()
             if "body-weight" not in p and "body_weight" not in p:
                 continue
@@ -356,7 +347,7 @@ class TestOrmMigrationIntegrity:
 
     def test_exactly_five_migrations(self):
         files = _migration_files()
-        assert len(files) == 7
+        assert len(files) == 13
 
     def test_linear_migration_chain(self):
         config = Config(str(ALEMBIC_INI))
@@ -378,7 +369,7 @@ class TestOrmMigrationIntegrity:
         script = ScriptDirectory.from_config(config)
         heads = script.get_heads()
         assert len(heads) == 1
-        assert heads[0] == "0295723946b2"
+        assert heads[0] == "91ac4e3d7b20"
 
     def test_exactly_one_base(self):
         config = Config(str(ALEMBIC_INI))

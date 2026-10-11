@@ -7,6 +7,8 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
+from fastapi.routing import iter_route_contexts
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +22,7 @@ from app.main import create_app
 from app.models.enums import ActivityLevel, BiologicalSex, NutritionGoal
 from app.models.nutrition_profile import NutritionProfile
 from app.models.user import User
+from tests.asgi_client import TaskYieldingASGIClient
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -159,7 +162,10 @@ def mock_session():
 @pytest.fixture
 def app(test_settings, mock_session):
     app = create_app(settings=test_settings)
-    app.dependency_overrides[deps_get_settings] = lambda: test_settings
+    async def override_get_settings():
+        return test_settings
+
+    app.dependency_overrides[deps_get_settings] = override_get_settings
 
     async def override_get_db_session():
         try:
@@ -168,14 +174,17 @@ def app(test_settings, mock_session):
             pass
 
     app.dependency_overrides[get_db_session] = override_get_db_session
-    return app
+    try:
+        yield app
+    finally:
+        app.dependency_overrides.clear()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+        yield TaskYieldingASGIClient(ac)
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +287,7 @@ class TestRouteRegistration:
         assert response.status_code == 404
 
     async def test_no_duplicate_routes(self, app):
-        paths = [r.path for r in app.routes if "nutrition-profile" in r.path]
+        paths = [r.path for r in iter_route_contexts(app.routes) if "nutrition-profile" in r.path]
         assert paths.count("/api/v1/nutrition-profile") == 3
         assert "/api/v1/nutrition-profile/calculations" in paths
 

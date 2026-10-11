@@ -20,34 +20,25 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // Check for backend-only session (email/password login)
-  const nutrimindSession = request.cookies.get("nutrimind_session")
-  if (nutrimindSession?.value === "1") {
-    const response = NextResponse.next()
-    response.headers.set("X-Frame-Options", "DENY")
-    response.headers.set("X-Content-Type-Options", "nosniff")
-    response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin")
-    return response
-  }
-
-  // Check for Supabase session (OAuth login)
+  // Validate the Supabase cookie with Auth; cookie presence alone is not proof.
   const { supabase, response } = createClient(request)
-  const { data: { session } } = await supabase.auth.getSession()
+  const { data: { user }, error } = await supabase.auth.getUser()
 
-  if (!session) {
+  if (error || !user) {
     const appUrl = getAppUrl()
     const loginUrl = new URL("/login", appUrl)
     loginUrl.searchParams.set("redirect", pathname)
     return NextResponse.redirect(loginUrl)
   }
 
-  if (session && (pathname === "/login" || pathname === "/register")) {
+  if (user && (pathname === "/login" || pathname === "/register")) {
     return NextResponse.redirect(new URL("/dashboard", getAppUrl()))
   }
 
   response.headers.set("X-Frame-Options", "DENY")
   response.headers.set("X-Content-Type-Options", "nosniff")
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin")
+  response.headers.set("Cache-Control", "private, no-store, max-age=0")
 
   return response
 }

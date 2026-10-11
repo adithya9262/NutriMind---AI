@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { getSupabaseAccessToken } from './helpers/supabase-session'
 
 function uuidv4() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -38,7 +39,7 @@ test('vertical gap verification', async ({ page }) => {
   await page.click('button[type="submit"]')
   await page.waitForTimeout(3000)
 
-  const token = await page.evaluate(() => localStorage.getItem('backend_access_token'))
+  const token = await getSupabaseAccessToken(page)
   const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
   const apiBase = 'http://localhost:8000/api/v1'
 
@@ -128,6 +129,7 @@ test('vertical gap verification', async ({ page }) => {
     const skels = document.querySelectorAll('[class*="skeleton" i]')
     return { leftKids, rightKids, leftGaps, rightGaps, skeletonCount: skels.length }
     })
+  if ('error' in measureA) throw new Error(measureA.error)
   console.log('=== STATE A (populated) ===')
   console.log('Skeletons:', measureA.skeletonCount)
   console.log('Left column items:', JSON.stringify(measureA.leftKids, null, 2))
@@ -163,6 +165,7 @@ test('vertical gap verification', async ({ page }) => {
     const skels = document.querySelectorAll('[class*="skeleton" i]')
     return { leftKids, rightKids, leftGaps, rightGaps, skeletonCount: skels.length }
   })
+  if ('error' in measureB) throw new Error(measureB.error)
   console.log('=== STATE B (refreshed) ===')
   console.log('Skeletons:', measureB.skeletonCount)
   console.log('Left gaps (px):', JSON.stringify(measureB.leftGaps))

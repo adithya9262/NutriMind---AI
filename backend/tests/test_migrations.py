@@ -95,11 +95,22 @@ class TestEnvPy:
 
 
 class TestBaselineMigration:
-    def test_exactly_five_migration_files(self):
+    def test_current_migration_file_count(self):
         files = [f for f in VERSIONS_DIR.iterdir() if f.suffix == ".py" and f.name != "__init__.py"]
-        assert len(files) == 7, (
-            f"Expected seven migration files, found {len(files)}: {[f.name for f in files]}"
+        assert len(files) == 13, (
+            f"Expected thirteen migration files, found {len(files)}: {[f.name for f in files]}"
         )
+
+    def test_supabase_identity_link_is_nullable_and_unique(self):
+        from app.models.user import User
+
+        column = User.__table__.columns["supabase_user_id"]
+        assert column.nullable is True
+        assert column.unique is True
+        migration = VERSIONS_DIR / "91ac4e3d7b20_add_supabase_identity_link.py"
+        source = migration.read_text(encoding="utf-8")
+        assert 'down_revision: str | None = "9d331b5a060d"' in source
+        assert '"ix_users_supabase_user_id"' in source
 
     def test_baseline_down_revision_is_none(self):
         files = [f for f in VERSIONS_DIR.iterdir() if f.suffix == ".py" and f.name != "__init__.py"]

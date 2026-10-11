@@ -51,8 +51,8 @@ test('Debug goal create - trace handler execution', async ({ page }) => {
     
     if (!fiberKey || !propsKey) return { error: 'No fiber or props found' }
     
-    const fiber = el[fiberKey]
-    const props = el[propsKey]
+    const fiber = Reflect.get(el, fiberKey) as { memoizedProps?: { onClick?: () => Promise<void> | void } } | undefined
+    const props = Reflect.get(el, propsKey) as { onClick?: () => Promise<void> | void } | undefined
     
     if (props && props.onClick) {
       try {
@@ -61,7 +61,7 @@ test('Debug goal create - trace handler execution', async ({ page }) => {
         return { success: true, source: 'props.onClick' }
       } catch (e) {
         console.error('[EVAL] props.onClick error:', e)
-        return { error: `props.onClick: ${e.message}` }
+        return { error: `props.onClick: ${e instanceof Error ? e.message : String(e)}` }
       }
     }
     
@@ -71,7 +71,7 @@ test('Debug goal create - trace handler execution', async ({ page }) => {
         await fiber.memoizedProps.onClick()
         return { success: true, source: 'fiber.memoizedProps.onClick' }
       } catch (e) {
-        return { error: `fiber onClick: ${e.message}` }
+        return { error: `fiber onClick: ${e instanceof Error ? e.message : String(e)}` }
       }
     }
     

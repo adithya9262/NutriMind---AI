@@ -24,7 +24,7 @@ export function DataCenterSection() {
     try {
       setIsExporting(true)
       const { getAccessToken } = await import("@/lib/token-storage")
-      const token = getAccessToken("backend") || getAccessToken("supabase")
+      const token = await getAccessToken()
 
       const baseUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") || ""
       const res = await fetch(`${baseUrl}/settings/export?format=${exportFormat}`, {
@@ -71,7 +71,7 @@ export function DataCenterSection() {
     try {
       setIsImporting(true)
       const { getAccessToken } = await import("@/lib/token-storage")
-      const token = getAccessToken("backend") || getAccessToken("supabase")
+      const token = await getAccessToken()
 
       const formData = new FormData()
       formData.append("file", file)

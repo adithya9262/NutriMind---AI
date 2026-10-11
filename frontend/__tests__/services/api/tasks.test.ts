@@ -255,15 +255,11 @@ describe("Task Service", () => {
     });
 
     it("inherits Bearer behavior from existing client", async () => {
-      const { setAccessToken } = await import("@/lib/token-storage");
-      setAccessToken("test-token", "backend");
       mockFetch.mockResolvedValueOnce(mockResponse(MOCK_LIST_RESPONSE));
       const { listTasks } = await import("@/services/api/tasks");
       await listTasks();
       const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
       expect(headers["Authorization"]).toMatch(/^Bearer /);
-      const { removeAccessToken } = await import("@/lib/token-storage");
-      removeAccessToken("backend");
     });
   });
 });

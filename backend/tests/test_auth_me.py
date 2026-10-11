@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +57,24 @@ def _setup_session_for_get_by_id(
     session.rollback = AsyncMock()
 
 
+class TaskYieldingASGIClient:
+    """Schedule each in-process request separately and bound any transport stall."""
+
+    def __init__(self, async_client: AsyncClient):
+        self.async_client = async_client
+
+    async def request(self, method: str, url: str, **kwargs):
+        request = asyncio.create_task(self.async_client.request(method, url, **kwargs))
+        await asyncio.sleep(0.1)
+        return await asyncio.wait_for(request, timeout=15)
+
+    async def get(self, url: str, **kwargs):
+        return await self.request("GET", url, **kwargs)
+
+    async def post(self, url: str, **kwargs):
+        return await self.request("POST", url, **kwargs)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -66,6 +86,7 @@ def test_settings():
         APP_ENV="test",
         DEBUG=False,
         CORS_ORIGINS="http://test",
+        DATABASE_URL="",
         JWT_SECRET_KEY="test-secret-key-that-is-at-least-32-characters!!",
     )
 
@@ -78,7 +99,11 @@ def mock_session():
 @pytest.fixture
 def app(test_settings, mock_session):
     app = create_app(settings=test_settings)
-    app.dependency_overrides[deps_get_settings] = lambda: test_settings
+
+    async def override_get_settings():
+        return test_settings
+
+    app.dependency_overrides[deps_get_settings] = override_get_settings
 
     async def override_get_db_session():
         try:
@@ -87,14 +112,17 @@ def app(test_settings, mock_session):
             pass
 
     app.dependency_overrides[get_db_session] = override_get_db_session
-    return app
+    try:
+        yield app
+    finally:
+        app.dependency_overrides.clear()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(app):
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as async_client:
+        yield TaskYieldingASGIClient(async_client)
 
 
 # ---------------------------------------------------------------------------
@@ -124,9 +152,7 @@ class TestRouteRegistration:
         assert response.status_code != 404
 
     async def test_health_still_public(self, client):
-        transport = ASGITransport(app=create_app(Settings(APP_ENV="test", DEBUG=False)))
-        async with AsyncClient(transport=transport, base_url="http://test") as c:
-            response = await c.get("/api/v1/health")
+        response = await client.get("/api/v1/health")
         assert response.status_code == 200
 
 

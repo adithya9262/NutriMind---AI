@@ -11,12 +11,12 @@ from app.db.base import Base
 from app.models.mixins import TimestampMixin
 
 if TYPE_CHECKING:
+    from app.models.ai_coach import AIUsageTracker, AIUserMemory, ChatSession
     from app.models.body_weight import BodyWeight
     from app.models.goal import Goal
     from app.models.nutrition_log import NutritionLog
     from app.models.nutrition_profile import NutritionProfile
     from app.models.task import Task
-    from app.models.ai_coach import ChatSession, AIUsageTracker, AIUserMemory
 
 
 class User(Base, TimestampMixin):
@@ -48,6 +48,12 @@ class User(Base, TimestampMixin):
         default=False,
         server_default=sa.text("false"),
         nullable=False,
+    )
+    supabase_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        nullable=True,
+        unique=True,
+        index=True,
     )
 
     nutrition_profile: Mapped[NutritionProfile | None] = relationship(
@@ -82,19 +88,19 @@ class User(Base, TimestampMixin):
         cascade="all, delete-orphan",
     )
 
-    chat_sessions: Mapped[list["ChatSession"]] = relationship(
+    chat_sessions: Mapped[list[ChatSession]] = relationship(
         "ChatSession",
         back_populates="user",
         cascade="all, delete-orphan",
     )
 
-    ai_usage_trackers: Mapped[list["AIUsageTracker"]] = relationship(
+    ai_usage_trackers: Mapped[list[AIUsageTracker]] = relationship(
         "AIUsageTracker",
         back_populates="user",
         cascade="all, delete-orphan",
     )
 
-    ai_memories: Mapped[list["AIUserMemory"]] = relationship(
+    ai_memories: Mapped[list[AIUserMemory]] = relationship(
         "AIUserMemory",
         back_populates="user",
         cascade="all, delete-orphan",

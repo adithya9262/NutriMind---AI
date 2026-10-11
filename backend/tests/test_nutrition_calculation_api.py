@@ -7,6 +7,8 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
+from fastapi.routing import iter_route_contexts
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +22,7 @@ from app.main import create_app
 from app.models.enums import ActivityLevel, BiologicalSex, NutritionGoal
 from app.models.nutrition_profile import NutritionProfile
 from app.models.user import User
+from tests.asgi_client import TaskYieldingASGIClient
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -171,7 +174,10 @@ def mock_session():
 @pytest.fixture
 def app(test_settings, mock_session):
     application = create_app(settings=test_settings)
-    application.dependency_overrides[deps_get_settings] = lambda: test_settings
+    async def override_get_settings():
+        return test_settings
+
+    application.dependency_overrides[deps_get_settings] = override_get_settings
 
     async def override_get_db_session():
         try:
@@ -180,14 +186,17 @@ def app(test_settings, mock_session):
             pass
 
     application.dependency_overrides[get_db_session] = override_get_db_session
-    return application
+    try:
+        yield application
+    finally:
+        application.dependency_overrides.clear()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+        yield TaskYieldingASGIClient(ac)
 
 
 CALC_URL = "/api/v1/nutrition-profile/calculations"
@@ -248,14 +257,14 @@ class TestRouteRegistration:
         assert response.status_code == 401
 
     async def test_existing_routes_preserved(self, app):
-        paths = [r.path for r in app.routes if "nutrition-profile" in r.path]
+        paths = [r.path for r in iter_route_contexts(app.routes) if "nutrition-profile" in r.path]
         assert paths.count("/api/v1/nutrition-profile") == 3
         assert "/api/v1/nutrition-profile/calculations" in paths
 
     async def test_calculations_route_has_get(self, app):
         route = next(
             r
-            for r in app.routes
+            for r in iter_route_contexts(app.routes)
             if getattr(r, "path", None) == "/api/v1/nutrition-profile/calculations"
         )
         methods = {m.upper() for m in route.methods}
@@ -564,7 +573,9 @@ class TestProfileLookup:
         )
         assert response.status_code == 200
 
-    async def test_missing_profile_returns_200_incomplete(self, client, test_settings, mock_session):
+    async def test_missing_profile_returns_200_incomplete(
+        self, client, test_settings, mock_session
+    ):
         user = _make_user()
         _setup_session_for_create(mock_session, user)
         token = create_access_token(user_id=user.id, settings=test_settings)

@@ -30,12 +30,12 @@ interface RequestOptions {
   token?: boolean;
 }
 
-function buildHeaders(token?: boolean): HeadersInit {
+async function buildHeaders(token?: boolean): Promise<HeadersInit> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   if (token) {
-    const accessToken = getAccessToken("backend") || getAccessToken("supabase");
+    const accessToken = await getAccessToken();
     if (accessToken) {
       headers["Authorization"] = `Bearer ${accessToken}`;
     }
@@ -86,7 +86,7 @@ async function doFetch<T>(
   timeoutId: ReturnType<typeof setTimeout>
 ): Promise<ApiResponse<T>> {
   try {
-    const requestHeaders = buildHeaders(useToken);
+    const requestHeaders = await buildHeaders(useToken);
     
     const fetchOptions: RequestInit = {
       method,

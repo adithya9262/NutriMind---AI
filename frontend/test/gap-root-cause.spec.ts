@@ -1,4 +1,5 @@
 import { test } from '@playwright/test'
+import { getSupabaseAccessToken } from './helpers/supabase-session'
 
 test.setTimeout(300000)
 
@@ -65,21 +66,9 @@ test('find the actual vertical gap on dashboard', async ({ page }) => {
   await page.waitForTimeout(2000)
   console.log('Profile saved')
 
-  // 3. Get token for API calls — WAIT for backend_access_token specifically (supabase token rejected by backend)
-  const token = await page.evaluate(() => {
-    return new Promise<string | null>(resolve => {
-      let attempts = 0
-      const check = () => {
-        const t = localStorage.getItem('backend_access_token')
-        if (t) resolve(t)
-        else if (++attempts < 60) setTimeout(check, 500)
-        else resolve(null)
-      }
-      check()
-    })
-  })
+  // 3. Read the current Supabase session token from its SSR cookie.
+  const token = await getSupabaseAccessToken(page)
   console.log(`Token: ${token ? 'YES' : 'NO'}`)
-  if (!token) { console.log('NO TOKEN - aborting'); return }
   const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
   const apiBase = 'http://localhost:8000/api/v1'
   const today = localDate()
@@ -210,6 +199,7 @@ test('find the actual vertical gap on dashboard', async ({ page }) => {
 
     return { docH, docW, vpH, mainClasses, containerY: Math.round(containerRect.y), kids, gaps }
   })
+  if ('error' in pageAnalysis) throw new Error(pageAnalysis.error)
 
   console.log('\n=== PAGE ANALYSIS ===')
   console.log(`Document height: ${pageAnalysis.docH}, Viewport height: ${pageAnalysis.vpH}`)

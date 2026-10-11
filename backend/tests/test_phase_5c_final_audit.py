@@ -18,6 +18,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +32,7 @@ from app.models.body_weight import BodyWeight
 from app.models.user import User
 from app.schemas.body_weight_trends import BodyWeightTrendData
 from app.services.body_weight import BodyWeightService
+from tests.asgi_client import TaskYieldingASGIClient
 
 NOW = datetime.now(UTC)
 
@@ -109,7 +111,10 @@ def mock_session() -> AsyncMock:
 @pytest.fixture
 def app(test_settings: Settings, mock_session: AsyncMock):
     application = create_app(settings=test_settings)
-    application.dependency_overrides[deps_get_settings] = lambda: test_settings
+    async def override_get_settings():
+        return test_settings
+
+    application.dependency_overrides[deps_get_settings] = override_get_settings
 
     async def override_get_db_session():
         try:
@@ -118,14 +123,17 @@ def app(test_settings: Settings, mock_session: AsyncMock):
             pass
 
     application.dependency_overrides[get_db_session] = override_get_db_session
-    return application
+    try:
+        yield application
+    finally:
+        application.dependency_overrides.clear()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(app):
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+        yield TaskYieldingASGIClient(ac)
 
 
 # ===========================================================================

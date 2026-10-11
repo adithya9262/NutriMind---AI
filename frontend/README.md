@@ -1,7 +1,6 @@
 # NutriMind AI — Frontend
 
-> **Version 2.0.0** — Complete UI redesign with the dark "forest-glass" design system.
-> Production-approved and ready for deployment.
+> **Version 2.0.0** — UI redesign using the dark "forest-glass" design system.
 
 Intelligent nutrition and wellness companion. This is the Next.js TypeScript frontend for
 the NutriMind AI platform, featuring a redesigned, production-ready user experience across
@@ -85,7 +84,7 @@ frontend/
 ├── contexts/                  # auth-context
 ├── hooks/                     # Feature data hooks
 ├── services/api/              # Typed API client + per-feature services
-├── lib/                       # token-storage, utils
+├── lib/                       # Supabase SSR session, API helpers, utilities
 ├── types/                     # Shared TypeScript types
 └── __tests__/                 # Vitest suite
 ```
@@ -158,8 +157,8 @@ npm run test:ui     # Vitest UI
 - **State:** React Context (`AuthProvider`) + feature-level data hooks.
 - **API:** Single centralized client (`services/api/client.ts`) with Bearer injection and
   typed success/error envelopes.
-- **Auth:** Token persisted in `localStorage` (see Security notes); `ProtectedRoute` gates
-  `(protected)` routes with login redirect preserving `?redirect=`.
+- **Auth:** Supabase SSR session cookies and server-validated middleware protect page
+  requests; backend APIs independently require bearer authorization.
 
 See `ARCHITECTURE.md` for the full breakdown.
 
@@ -176,8 +175,7 @@ See `ARCHITECTURE.md` for the full breakdown.
 ## Future roadmap
 
 See `RELEASE_NOTES_v2.0.md` → Known limitations & `docs/FUTURE_FEATURES.md` (repo root) for
-aspirational features (real AI streaming, functional settings toggles, nutrition-search
-backend, image optimization, HttpOnly cookie auth).
+aspirational features (functional settings toggles and image optimization).
 
 ## License
 

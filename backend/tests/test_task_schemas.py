@@ -13,10 +13,10 @@ from app.core.tasks import (
     MAX_TASK_DESCRIPTION_LENGTH,
     MAX_TASK_TITLE_LENGTH,
     Task,
-    TaskPriority,
-    TaskStatus,
     TaskCategory,
+    TaskPriority,
     TaskRecurrence,
+    TaskStatus,
 )
 from app.schemas.tasks import (
     TaskCompletionSuccessResponse,
@@ -1339,7 +1339,7 @@ class TestPhaseBoundaries:
 
         migration_dir = "alembic/versions"
         files = [f for f in os.listdir(migration_dir) if f.endswith(".py") and f != "__init__.py"]
-        assert len(files) == 7
+        assert len(files) == 13
         assert any("0295723946b2" in f for f in files)
 
     def test_task_routes_in_openapi(self):
@@ -1369,7 +1369,7 @@ class TestPhaseBoundaries:
         from alembic.script import ScriptDirectory
 
         script = ScriptDirectory.from_config(Config("alembic.ini"))
-        assert script.get_current_head() == "0295723946b2"
+        assert script.get_current_head() == "91ac4e3d7b20"
 
     def test_exactly_one_bearer_auth(self):
         from app.main import create_app

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { BodyWeightHistoryList } from "@/components/body-weight-history-list";
+import { formatDate } from "@/lib/format";
 import type { BodyWeightEntryData, DeleteStatus } from "@/types/body-weight";
 
 const MOCK_ENTRIES: BodyWeightEntryData[] = [
@@ -54,8 +55,8 @@ describe("BodyWeightHistoryList", () => {
 
   it("renders entries when available", () => {
     renderList(MOCK_ENTRIES, "available");
-    expect(screen.getByText("12 July 2026")).toBeInTheDocument();
-    expect(screen.getByText("11 July 2026")).toBeInTheDocument();
+    expect(screen.getByText(formatDate(MOCK_ENTRIES[0].logged_date))).toBeInTheDocument();
+    expect(screen.getByText(formatDate(MOCK_ENTRIES[1].logged_date))).toBeInTheDocument();
   });
 
   it("renders delete button for each entry", () => {

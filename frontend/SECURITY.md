@@ -2,33 +2,37 @@
 
 ## Authentication
 
-- Authentication is token-based. On login/register the backend returns an `access_token`,
-  which the frontend stores via `lib/token-storage.ts` and injects as
-  `Authorization: Bearer <token>` on authenticated requests through the centralized API
-  client.
+- Supabase Auth owns browser login, registration, OAuth, refresh, and logout. The browser
+  session is persisted by `@supabase/ssr` in cookies. Middleware calls Supabase Auth to
+  validate protected page requests; cookie presence alone is never accepted.
+- Authenticated API requests obtain the current Supabase session token through the Supabase
+  client and send it in `Authorization: Bearer <token>`. Backend authorization remains
+  mandatory and does not trust frontend middleware or an auth cookie.
 - `ProtectedRoute` gates all `(protected)` routes. Unauthenticated users are redirected to
   `/login` with a safe `?redirect=` parameter (validated to start with `/` and not `//`,
   preventing open redirects).
-- Logout clears the token from storage and resets the auth context.
+- Logout uses Supabase `signOut`, clearing the Supabase-managed session and auth context.
 
 ## Token handling
 
-- **Storage:** the access token is persisted in `localStorage` (key `nutrimind_access_token`).
-- **Exposure:** `localStorage` is readable by any JavaScript running on the same origin.
-  A successful XSS attack could exfiltrate the token. There is **no refresh token** in the
-  current design, limiting the blast radius to the access-token lifetime.
-- **Safeguards:** tokens are never logged, rendered, placed in URLs, or written to feature
-  state. Storage access is wrapped in `try/catch` and guarded by `typeof window` checks.
-- **No secrets in the client:** only `NEXT_PUBLIC_API_URL` is browser-safe. Backend
-  secrets (JWT signing key, database URL, API keys) must never be exposed to the frontend.
+- **Storage:** the Supabase SSR client manages chunked session cookies and refresh behavior;
+  there is no separate custom localStorage token store or backend-token mirror.
+- **Cookie flags:** cookies use `Secure` in production and `SameSite=Lax`. The browser
+  Supabase client must read and refresh its session, so these cookies are not `HttpOnly`.
+  Same-origin JavaScript can access session material; XSS can still steal tokens.
+- **Safeguards:** auth diagnostics do not log user objects or bearer tokens; API tokens are
+  sent only in authorization headers and are not placed in URLs.
+- **No secrets in the client:** `NEXT_PUBLIC_API_URL` and the Supabase project URL/public
+  anon key are browser-safe. Backend signing keys, database URLs, service-role keys, and
+  provider API keys must never be exposed to the frontend.
 
 ## Known limitations
 
-1. **`localStorage` token storage** — vulnerable to XSS token theft. The recommended fix is
-   HttpOnly, Secure, SameSite cookies issued by the backend (requires backend session
-   support; out of scope for v2.0).
-2. **No CSRF protection on cookie auth** — only relevant if/when migrated to cookie auth;
-   Bearer-token-in-header currently avoids classic CSRF but inherits the XSS exposure above.
+1. **Supabase session cookie visibility** — `@supabase/ssr` browser refresh requires
+   JavaScript access. A server-only HttpOnly session would require a server-side auth and API
+   proxy with refresh handling; that broader design is not implemented.
+2. **CSRF** — backend APIs authenticate from explicit bearer headers, not ambient cookies.
+   Supabase auth endpoints use the Supabase SDK flow.
 3. **Settings toggles are non-functional** — they do not persist or change behavior, so they
    cannot introduce a security-affecting state change.
 4. **Demo/placeholder content** is frontend-only and clearly labeled; it never reaches the
@@ -36,7 +40,8 @@
 
 ## Recommended future improvements
 
-- Migrate auth tokens to HttpOnly + Secure + SameSite cookies (backend change).
+- Consider a server-side auth/API proxy if HttpOnly-only session cookies become a product
+  requirement; preserve refresh rotation and add CSRF defenses as part of that design.
 - Add Subresource Integrity / strict CSP to reduce XSS blast radius.
 - Add client-side input sanitization review and dependency vulnerability scanning in CI.
 - Consider short-lived access tokens with refresh rotation.
@@ -49,7 +54,7 @@
 - [x] Open-redirect prevention on `?redirect=`.
 - [x] Password fields use `type="password"` and correct `autoComplete`.
 - [x] Tokens never logged, rendered, or placed in URLs.
-- [x] `localStorage` access guarded and exception-safe.
-- [x] Build/lint/type-check green; no debug code committed.
-- [ ] (Planned) Move tokens to HttpOnly cookies.
+- [x] No parallel custom localStorage bearer-token store.
+- [x] Middleware validates Supabase sessions instead of trusting a constant cookie.
+- [ ] Verify full Supabase and backend session lifecycle in the deployment environment.
 - [ ] (Planned) Add CSP / SRI / dependency scanning.

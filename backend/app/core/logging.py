@@ -8,6 +8,8 @@ _logging_initialized = False
 
 class RequestIDFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
+        if hasattr(record, "request_id"):
+            return True
         try:
             from .middleware import get_request_id
 

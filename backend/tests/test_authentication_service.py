@@ -15,8 +15,8 @@ from app.models.user import User
 from app.repositories.user import UserRepository
 from app.schemas.auth import LoginRequest, RegisterRequest
 from app.services.authentication import (
-    AuthenticationService,
     SUPABASE_PASSWORD_SENTINEL,
+    AuthenticationService,
 )
 
 
@@ -31,6 +31,7 @@ def _make_user(
     user.password_hash = password_hash
     user.is_active = is_active
     user.is_verified = False
+    user.supabase_user_id = None
     return user
 
 
@@ -875,6 +876,7 @@ class TestSyncSupabaseUserSecurity:
         result = await service.sync_supabase_user(
             supabase_email="user@example.com",
             supabase_user_id=str(uuid.uuid4()),
+            email_verified=True,
         )
         assert result is existing_user
         assert result.password_hash == original_hash
@@ -888,6 +890,7 @@ class TestSyncSupabaseUserSecurity:
         result = await service.sync_supabase_user(
             supabase_email="oauth@example.com",
             supabase_user_id=str(uuid.uuid4()),
+            email_verified=True,
         )
         assert result is existing_user
         assert result.password_hash == SUPABASE_PASSWORD_SENTINEL
@@ -896,15 +899,73 @@ class TestSyncSupabaseUserSecurity:
     async def test_new_user_creates_with_sentinel(self):
         repo = _make_repo()
         repo.get_by_email.return_value = None
+        repo.get_by_supabase_id.return_value = None
         repo.create.return_value = _make_user(password_hash=SUPABASE_PASSWORD_SENTINEL)
         service = AuthenticationService(repo)
         result = await service.sync_supabase_user(
             supabase_email="new@example.com",
             supabase_user_id=str(uuid.uuid4()),
+            email_verified=True,
         )
+        assert result is not None
         repo.create.assert_awaited_once()
         call_kwargs = repo.create.call_args.kwargs
         assert call_kwargs["password_hash"] == SUPABASE_PASSWORD_SENTINEL
+
+    async def test_unverified_email_raises_value_error(self):
+        repo = _make_repo()
+        service = AuthenticationService(repo)
+        with pytest.raises(ValueError, match="verified Supabase email is required"):
+            await service.sync_supabase_user(
+                supabase_email="unverified@example.com",
+                supabase_user_id=str(uuid.uuid4()),
+                email_verified=False,
+            )
+
+    async def test_conflicting_supabase_id_raises_oauth_account_exists_error(self):
+        repo = _make_repo()
+        existing_user = _make_user(email="user@example.com")
+        existing_user.supabase_user_id = uuid.uuid4()
+        repo.get_by_email.return_value = existing_user
+        service = AuthenticationService(repo)
+        with pytest.raises(OAuthAccountExistsError):
+            await service.sync_supabase_user(
+                supabase_email="user@example.com",
+                supabase_user_id=str(uuid.uuid4()),
+                email_verified=True,
+            )
+
+    async def test_conflicting_email_for_existing_identity_raises_oauth_account_exists_error(self):
+        repo = _make_repo()
+        repo.get_by_email.return_value = None
+        existing_identity = _make_user(email="victim@example.com")
+        same_uid = uuid.uuid4()
+        existing_identity.supabase_user_id = same_uid
+        repo.get_by_supabase_id.return_value = existing_identity
+        service = AuthenticationService(repo)
+        with pytest.raises(OAuthAccountExistsError):
+            await service.sync_supabase_user(
+                supabase_email="attacker@example.com",
+                supabase_user_id=str(same_uid),
+                email_verified=True,
+            )
+
+    async def test_unlinked_existing_user_links_identity(self):
+        repo = _make_repo()
+        existing_user = _make_user(email="local@example.com")
+        existing_user.supabase_user_id = None
+        existing_user.is_verified = False
+        repo.get_by_email.return_value = existing_user
+        service = AuthenticationService(repo)
+        new_uid = uuid.uuid4()
+        result = await service.sync_supabase_user(
+            supabase_email="local@example.com",
+            supabase_user_id=str(new_uid),
+            email_verified=True,
+        )
+        assert result.supabase_user_id == new_uid
+        assert result.is_verified is True
+        repo._session.flush.assert_awaited_once()
 
 
 class TestRegisterDuplicateStillSecure:

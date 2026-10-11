@@ -9,7 +9,7 @@ export async function exportData(format: "csv" | "xlsx" | "json" | "pdf" | "txt"
   const baseUrl =
     process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") || "http://localhost:8001";
 
-  const token = getAccessToken("supabase") || getAccessToken("backend");
+  const token = await getAccessToken();
 
   const response = await fetch(`${baseUrl}/settings/export?format=${format}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},

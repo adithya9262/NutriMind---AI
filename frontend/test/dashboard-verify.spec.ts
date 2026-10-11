@@ -70,6 +70,7 @@ test.describe('Dashboard Layout Final Verification', () => {
       
       return { mainSections: children, twoColLayouts: twoCols, skeletonCount: skels.length, scrollHeight: document.documentElement.scrollHeight, viewportHeight: window.innerHeight }
     })
+    if ('error' in layout) throw new Error(layout.error)
     
     console.log('LAYOUT VERIFICATION:', JSON.stringify(layout, null, 2))
     

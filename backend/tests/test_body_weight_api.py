@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -93,8 +95,12 @@ def mock_session():
 
 @pytest.fixture
 def app(test_settings, mock_session):
-    app = create_app(settings=test_settings)
-    app.dependency_overrides[deps_get_settings] = lambda: test_settings
+    application = create_app(settings=test_settings)
+
+    async def override_get_settings():
+        return test_settings
+
+    application.dependency_overrides[deps_get_settings] = override_get_settings
 
     async def override_get_db_session():
         try:
@@ -102,15 +108,43 @@ def app(test_settings, mock_session):
         finally:
             pass
 
-    app.dependency_overrides[get_db_session] = override_get_db_session
-    return app
+    application.dependency_overrides[get_db_session] = override_get_db_session
+    try:
+        yield application
+    finally:
+        application.dependency_overrides.clear()
 
 
-@pytest.fixture
+class TaskYieldingASGIClient:
+    def __init__(self, async_client: AsyncClient):
+        self.async_client = async_client
+
+    async def request(self, method: str, url: str, **kwargs):
+        request = asyncio.create_task(self.async_client.request(method, url, **kwargs))
+        await asyncio.sleep(0.1)
+        return await asyncio.wait_for(request, timeout=15)
+
+    async def get(self, url: str, **kwargs):
+        return await self.request("GET", url, **kwargs)
+
+    async def post(self, url: str, **kwargs):
+        return await self.request("POST", url, **kwargs)
+
+    async def put(self, url: str, **kwargs):
+        return await self.request("PUT", url, **kwargs)
+
+    async def patch(self, url: str, **kwargs):
+        return await self.request("PATCH", url, **kwargs)
+
+    async def delete(self, url: str, **kwargs):
+        return await self.request("DELETE", url, **kwargs)
+
+
+@pytest_asyncio.fixture
 async def client(app):
     transport = ASGITransport(app=app, raise_app_exceptions=False)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    async with AsyncClient(transport=transport, base_url="http://test") as async_client:
+        yield TaskYieldingASGIClient(async_client)
 
 
 # ===========================================================================
@@ -120,11 +154,11 @@ async def client(app):
 
 class TestRouteRegistration:
     async def test_router_exists(self, app):
-        paths = [r.path for r in app.routes if "body-weight" in r.path or "body_weight" in r.path]
+        paths = [path for path in app.openapi()["paths"] if "body-weight" in path]
         assert len(paths) > 0
 
     async def test_correct_prefix(self, app):
-        paths = [r.path for r in app.routes if "body-weight" in r.path]
+        paths = [path for path in app.openapi()["paths"] if "body-weight" in path]
         for p in paths:
             assert p.startswith("/api/v1/body-weights")
 
@@ -142,9 +176,7 @@ class TestRouteRegistration:
         assert response.status_code != 404
 
     async def test_no_duplicate_body_weight_paths(self, app):
-        bw_routes = {
-            r.path for r in app.routes if "body-weight" in r.path or "body_weight" in r.path
-        }
+        bw_routes = {path for path in app.openapi()["paths"] if "body-weight" in path}
         assert len(bw_routes) == 4
         assert "/api/v1/body-weights" in bw_routes
         assert "/api/v1/body-weights/trend" in bw_routes
@@ -153,18 +185,17 @@ class TestRouteRegistration:
 
     async def test_no_singular_path(self, app):
         paths = [
-            r.path for r in app.routes if "body-weight" in r.path and "body-weights" not in r.path
+            path
+            for path in app.openapi()["paths"]
+            if "body-weight" in path and "body-weights" not in path
         ]
         assert len(paths) == 0
 
     async def test_no_get_by_id(self, app):
         get_paths = [
-            r.path
-            for r in app.routes
-            if "body-weight" in r.path
-            and hasattr(r, "methods")
-            and "GET" in r.methods
-            and "{entry_id}" in r.path
+            path
+            for path, methods in app.openapi()["paths"].items()
+            if "body-weight" in path and "{entry_id}" in path and "get" in methods
         ]
         assert len(get_paths) == 0
 

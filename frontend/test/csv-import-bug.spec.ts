@@ -9,7 +9,7 @@ test('CSV Import breaks Tasks/Goals - reproduce sequence', async ({ page }) => {
   page.on('response', async resp => {
     const u = resp.url()
     if (u.includes('/api/v1/')) {
-      const entry = { method: resp.request().method(), path: u.replace('http://localhost:8000/api/v1', ''), status: resp.status() }
+      const entry: typeof apiCalls[number] = { method: resp.request().method(), path: u.replace('http://localhost:8000/api/v1', ''), status: resp.status() }
       try { entry.body = await resp.text() } catch(e) {}
       apiCalls.push(entry)
       console.log(`[${entry.status}] ${entry.method} ${entry.path}`)

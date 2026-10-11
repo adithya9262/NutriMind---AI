@@ -3,7 +3,7 @@ import { getAccessToken } from "@/lib/token-storage"
 const getBaseUrl = () => (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "")
 
 async function fetchText(path: string): Promise<string> {
-  const token = getAccessToken("supabase") || getAccessToken("backend")
+  const token = await getAccessToken()
 
   const res = await fetch(`${getBaseUrl()}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},

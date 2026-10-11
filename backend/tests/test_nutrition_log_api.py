@@ -6,6 +6,8 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
+from fastapi.routing import iter_route_contexts
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +20,7 @@ from app.db.dependencies import get_db_session
 from app.main import create_app
 from app.models.nutrition_log import NutritionLog
 from app.models.user import User
+from tests.asgi_client import TaskYieldingASGIClient
 
 NOW = datetime.now(UTC)
 TEST_LOGGED_DATE = date(2026, 7, 12)
@@ -107,7 +110,10 @@ def mock_session():
 @pytest.fixture
 def app(test_settings, mock_session):
     app = create_app(settings=test_settings)
-    app.dependency_overrides[deps_get_settings] = lambda: test_settings
+    async def override_get_settings():
+        return test_settings
+
+    app.dependency_overrides[deps_get_settings] = override_get_settings
 
     async def override_get_db_session():
         try:
@@ -116,14 +122,17 @@ def app(test_settings, mock_session):
             pass
 
     app.dependency_overrides[get_db_session] = override_get_db_session
-    return app
+    try:
+        yield app
+    finally:
+        app.dependency_overrides.clear()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(app):
     transport = ASGITransport(app=app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+        yield TaskYieldingASGIClient(ac)
 
 
 # ===========================================================================
@@ -133,11 +142,11 @@ async def client(app):
 
 class TestRouteRegistration:
     async def test_router_exists(self, app):
-        paths = [r.path for r in app.routes if "nutrition-logs" in r.path]
+        paths = [r.path for r in iter_route_contexts(app.routes) if "nutrition-logs" in r.path]
         assert len(paths) > 0
 
     async def test_correct_prefix(self, app):
-        paths = [r.path for r in app.routes if "nutrition-logs" in r.path]
+        paths = [r.path for r in iter_route_contexts(app.routes) if "nutrition-logs" in r.path]
         for p in paths:
             assert p.startswith("/api/v1/nutrition-logs")
 
@@ -155,7 +164,10 @@ class TestRouteRegistration:
         assert response.status_code != 404
 
     async def test_no_duplicate_nutrition_log_paths(self, app):
-        nutrition_routes = {r.path for r in app.routes if "nutrition-logs" in r.path}
+        nutrition_routes = {
+            r.path for r in iter_route_contexts(app.routes)
+            if "nutrition-logs" in r.path
+        }
         # POST and GET share /api/v1/nutrition-logs; GET /summary and GET /progress
         # are static; DELETE uses /{entry_id}
         assert len(nutrition_routes) == 4
@@ -167,25 +179,37 @@ class TestRouteRegistration:
     async def test_no_singular_path(self, app):
         paths = [
             r.path
-            for r in app.routes
+            for r in iter_route_contexts(app.routes)
             if "nutrition-log" in r.path and "nutrition-logs" not in r.path
         ]
         assert len(paths) == 0
 
     async def test_no_create_subpath(self, app):
-        paths = [r.path for r in app.routes if "/nutrition-logs/create" in r.path]
+        paths = [
+            r.path for r in iter_route_contexts(app.routes)
+            if "/nutrition-logs/create" in r.path
+        ]
         assert len(paths) == 0
 
     async def test_no_list_subpath(self, app):
-        paths = [r.path for r in app.routes if "/nutrition-logs/list" in r.path]
+        paths = [
+            r.path for r in iter_route_contexts(app.routes)
+            if "/nutrition-logs/list" in r.path
+        ]
         assert len(paths) == 0
 
     async def test_no_delete_subpath(self, app):
-        paths = [r.path for r in app.routes if "/nutrition-logs/delete" in r.path]
+        paths = [
+            r.path for r in iter_route_contexts(app.routes)
+            if "/nutrition-logs/delete" in r.path
+        ]
         assert len(paths) == 0
 
     async def test_no_user_id_path(self, app):
-        paths = [r.path for r in app.routes if "users/" in r.path and "nutrition-logs" in r.path]
+        paths = [
+            r.path for r in iter_route_contexts(app.routes)
+            if "users/" in r.path and "nutrition-logs" in r.path
+        ]
         assert len(paths) == 0
 
     async def test_no_put_endpoint(self, client):
@@ -199,7 +223,7 @@ class TestRouteRegistration:
     async def test_no_extra_post_endpoint(self, app):
         post_paths = [
             r.path
-            for r in app.routes
+            for r in iter_route_contexts(app.routes)
             if "nutrition-logs" in r.path and hasattr(r, "methods") and "POST" in r.methods
         ]
         assert len(post_paths) == 1
@@ -207,20 +231,21 @@ class TestRouteRegistration:
     async def test_no_aggregation_endpoint(self, app):
         paths = [
             r.path
-            for r in app.routes
+            for r in iter_route_contexts(app.routes)
             if "nutrition-logs" in r.path and "aggregat" in r.path.lower()
         ]
         assert len(paths) == 0
 
     async def test_daily_summary_endpoint_exists(self, app):
         paths = [
-            r.path for r in app.routes if "nutrition-logs" in r.path and "summary" in r.path.lower()
+            r.path for r in iter_route_contexts(app.routes)
+            if "nutrition-logs" in r.path and "summary" in r.path.lower()
         ]
         assert len(paths) == 1
         assert "/api/v1/nutrition-logs/summary" in paths
 
     async def test_registered_exactly_once(self, app):
-        paths = [r.path for r in app.routes if "nutrition-logs" in r.path]
+        paths = [r.path for r in iter_route_contexts(app.routes) if "nutrition-logs" in r.path]
         expected = {
             "/api/v1/nutrition-logs",
             "/api/v1/nutrition-logs/summary",

@@ -158,7 +158,13 @@ class TestNutritionLogRouteOrdering:
     """Static routes must be registered before dynamic {entry_id} routes."""
 
     def test_routes_in_correct_order(self):
-        paths = [r.path for r in router.routes if hasattr(r, "path") and "nutrition-logs" in r.path]
+        from fastapi.routing import iter_route_contexts
+
+        paths = [
+            r.path
+            for r in iter_route_contexts(router.routes)
+            if hasattr(r, "path") and "nutrition-logs" in r.path
+        ]
         nl_paths = [p for p in paths if "/nutrition-logs" in p]
         for expected in [
             "/nutrition-logs",

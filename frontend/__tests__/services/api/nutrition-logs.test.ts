@@ -274,15 +274,11 @@ describe("Nutrition Logs Service", () => {
     });
 
     it("inherits Bearer behavior from existing client", async () => {
-      const { setAccessToken } = await import("@/lib/token-storage");
-      setAccessToken("test-token", "backend");
       mockFetch.mockResolvedValueOnce(mockResponse(MOCK_LIST_RESPONSE));
       const { listNutritionLogEntries } = await import("@/services/api/nutrition-logs");
       await listNutritionLogEntries("2025-06-15");
       const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
       expect(headers["Authorization"]).toMatch(/^Bearer /);
-      const { removeAccessToken } = await import("@/lib/token-storage");
-      removeAccessToken("backend");
     });
   });
 });

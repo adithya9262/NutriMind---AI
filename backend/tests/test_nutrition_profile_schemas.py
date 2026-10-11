@@ -1371,7 +1371,7 @@ class TestSecurityPhaseBoundary:
 
         versions_dir = Path(__file__).resolve().parent.parent / "alembic" / "versions"
         files = [f for f in versions_dir.iterdir() if f.suffix == ".py" and f.name != "__init__.py"]
-        assert len(files) == 7
+        assert len(files) == 13
 
     def test_no_frontend_changes(self):
         frontend_dir = Path(__file__).resolve().parent.parent.parent / "frontend"

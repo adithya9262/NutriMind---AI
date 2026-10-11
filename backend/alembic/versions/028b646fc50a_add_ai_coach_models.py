@@ -63,4 +63,6 @@ def downgrade() -> None:
     op.drop_table('chat_sessions')
     op.drop_index(op.f('ix_ai_usage_trackers_user_id'), table_name='ai_usage_trackers')
     op.drop_table('ai_usage_trackers')
+    op.execute(sa.text("DROP TYPE IF EXISTS chatrole"))
     # ### end Alembic commands ###
+

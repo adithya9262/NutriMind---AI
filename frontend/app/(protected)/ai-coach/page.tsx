@@ -377,7 +377,7 @@ export default function AICoachPage() {
 
       try {
         const { getAccessToken } = await import("@/lib/token-storage")
-        const token = getAccessToken("backend") || getAccessToken("supabase")
+        const token = await getAccessToken()
 
         const baseUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") || ""
         const res = await fetch(`${baseUrl}/ai-coach/chat`, {

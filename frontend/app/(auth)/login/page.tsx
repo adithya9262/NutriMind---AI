@@ -6,7 +6,6 @@ import Link from "next/link"
 import { motion } from "framer-motion"
 import { useAuth } from "@/contexts/auth-context"
 import { loginUser } from "@/services/api/auth"
-import { setAccessToken } from "@/lib/token-storage"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { FormField } from "@/components/ui/form-field"
@@ -61,9 +60,6 @@ export default function LoginPage() {
           ? "This account was created with Google or Apple. Please sign in with Google or Apple, or use 'Forgot Password' to set a password."
           : "Invalid email or password."))
       } else if (result.data) {
-        // Store the backend token and set a session cookie for the middleware
-        setAccessToken(result.data.access_token, "backend")
-        document.cookie = `nutrimind_session=1; path=/; max-age=86400; SameSite=Lax`
         await refreshSession()
         const redirect = searchParams.get("redirect") || "/dashboard"
         if (redirect.startsWith("/") && !redirect.startsWith("//")) {

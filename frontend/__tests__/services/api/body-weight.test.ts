@@ -243,15 +243,11 @@ describe("Body Weight Service", () => {
     });
 
     it("inherits Bearer behavior from existing client", async () => {
-      const { setAccessToken } = await import("@/lib/token-storage");
-      setAccessToken("test-token", "backend");
       mockFetch.mockResolvedValueOnce(mockResponse(MOCK_HISTORY_RESPONSE));
       const { listBodyWeightHistory } = await import("@/services/api/body-weight");
       await listBodyWeightHistory();
       const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
       expect(headers["Authorization"]).toMatch(/^Bearer /);
-      const { removeAccessToken } = await import("@/lib/token-storage");
-      removeAccessToken("backend");
     });
 
     it("Decimal strings remain strings", async () => {

@@ -6,13 +6,16 @@ describe("LandingPage", () => {
   it("renders the hero heading", () => {
     render(<HomePage />);
     expect(
-      screen.getByRole("heading", { level: 1, name: /Engineering Human Potential/i }),
+      screen.getByRole("heading", {
+        level: 1,
+        name: /Understand Your Nutrition\. Build Better Habits\./i,
+      }),
     ).toBeInTheDocument();
   });
 
   it("renders Get started button", () => {
     render(<HomePage />);
-    expect(screen.getByText("Get started")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Get Started/i }).length).toBeGreaterThan(0);
   });
 
   it("renders Sign in button", () => {
@@ -34,8 +37,8 @@ describe("LandingPage", () => {
     expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
   });
 
-  it("renders backend status section", () => {
+  it("renders the product description", () => {
     render(<HomePage />);
-    expect(screen.getByText(/checking/i)).toBeInTheDocument();
+    expect(screen.getByText(/Track meals, nutrition goals, body weight and daily habits/i)).toBeInTheDocument();
   });
 });

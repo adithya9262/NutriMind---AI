@@ -1,4 +1,5 @@
 """AI Coach API — chat, session management, usage tracking."""
+
 from __future__ import annotations
 
 import json
@@ -48,6 +49,7 @@ DAILY_IMAGE_LIMIT = 5
 
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
 
+
 class ChatRequest(BaseModel):
     message: str
     session_id: uuid.UUID | None = None
@@ -59,6 +61,7 @@ class ChatMessageFeedbackRequest(BaseModel):
     is_not_helpful: bool | None = None
     was_copied: bool | None = None
     was_regenerated: bool | None = None
+
 
 class ChatSessionCreate(BaseModel):
     title: str
@@ -123,11 +126,17 @@ class AIUsageHistoryResponse(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _next_reset_utc() -> str:
     """ISO timestamp of next UTC midnight."""
     now = datetime.now(UTC)
     tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return tomorrow.isoformat()
+
+
+def _today_utc() -> date:
+    """Use the same UTC calendar day as the quota reset timestamp."""
+    return datetime.now(UTC).date()
 
 
 async def _upsert_usage_tracker(
@@ -140,7 +149,7 @@ async def _upsert_usage_tracker(
     """Atomically upsert today's usage row using ON CONFLICT DO UPDATE.
     This is the auto-daily-reset mechanism: a new row is created each day,
     so yesterday's counts are automatically left behind."""
-    today = date.today()
+    today = _today_utc()
     stmt = (
         pg_insert(AIUsageTracker)
         .values(
@@ -184,6 +193,7 @@ async def _upsert_usage_tracker(
             await session.flush()
     return row
 
+
 async def _extract_memory_background(user_id: uuid.UUID, message: str, ai_response: str) -> None:
     """Background task to extract facts from user message and store them in AIUserMemory."""
     try:
@@ -199,15 +209,16 @@ User Message: {message}"""
         response = await service.chat(prompt, context=None)
 
         # Parse JSON
-        start_idx = response.find('[')
-        end_idx = response.rfind(']')
+        start_idx = response.find("[")
+        end_idx = response.rfind("]")
         if start_idx != -1 and end_idx != -1:
-            json_str = response[start_idx:end_idx + 1]
+            json_str = response[start_idx : end_idx + 1]
             memories = json.loads(json_str)
 
             if memories:
                 from app.db.session import db_manager
                 from app.models.ai_coach import AIUserMemory
+
                 async with db_manager.session_factory() as session:
                     for mem in memories:
                         content = mem.get("content")
@@ -224,10 +235,13 @@ User Message: {message}"""
                             )
                             session.add(new_mem)
                     await session.commit()
-    except Exception as e:
-        logger.error(f"Failed to extract memory: {e}")
+    except Exception as exc:
+        logger.error("Failed to extract AI memory (%s)", type(exc).__name__)
 
-async def _build_user_context(user_id: uuid.UUID, session: AsyncSession, current_message: str) -> str:
+
+async def _build_user_context(
+    user_id: uuid.UUID, session: AsyncSession, current_message: str
+) -> str:
     """Build a rich, personalised context string injected into every AI prompt.
 
     Covers: profile biometrics, computed age, active goal + macros,
@@ -241,18 +255,23 @@ async def _build_user_context(user_id: uuid.UUID, session: AsyncSession, current
 
     # ── Nutrition profile ─────────────────────────────────────────────────
     profile: NutritionProfile | None = (
-        await session.execute(
-            select(NutritionProfile).where(NutritionProfile.user_id == user_id)
-        )
-    ).scalars().first()
+        (await session.execute(select(NutritionProfile).where(NutritionProfile.user_id == user_id)))
+        .scalars()
+        .first()
+    )
 
     if profile:
         # Compute age from date_of_birth
         age_str = "unknown"
         if profile.date_of_birth:
-            today = date.today()
-            age = today.year - profile.date_of_birth.year - (
-                (today.month, today.day) < (profile.date_of_birth.month, profile.date_of_birth.day)
+            today = _today_utc()
+            age = (
+                today.year
+                - profile.date_of_birth.year
+                - (
+                    (today.month, today.day)
+                    < (profile.date_of_birth.month, profile.date_of_birth.day)
+                )
             )
             age_str = str(age)
 
@@ -271,7 +290,9 @@ async def _build_user_context(user_id: uuid.UUID, session: AsyncSession, current
         if profile.allergies:
             lines.append(f"Allergies/intolerances: {', '.join(profile.allergies)}.")
         if profile.medical_conditions:
-            lines.append(f"Medical conditions (for context, not for diagnosis): {', '.join(profile.medical_conditions)}.")
+            lines.append(
+                f"Medical conditions (for context, not for diagnosis): {', '.join(profile.medical_conditions)}."
+            )
         if profile.daily_calorie_goal:
             lines.append(f"Daily calorie goal: {profile.daily_calorie_goal} kcal.")
         if profile.daily_protein_goal_g:
@@ -281,18 +302,22 @@ async def _build_user_context(user_id: uuid.UUID, session: AsyncSession, current
 
     # ── Active goal ────────────────────────────────────────────────────────
     active_goal: Goal | None = (
-        await session.execute(
-            select(Goal).where(
-                Goal.user_id == user_id,
-                Goal.status == GoalStatus.ACTIVE,
-            ).order_by(desc(Goal.created_at))
+        (
+            await session.execute(
+                select(Goal)
+                .where(
+                    Goal.user_id == user_id,
+                    Goal.status == GoalStatus.ACTIVE,
+                )
+                .order_by(desc(Goal.created_at))
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
     if active_goal:
-        lines.append(
-            f"Active goal: {active_goal.goal_type.value} — {active_goal.title}."
-        )
+        lines.append(f"Active goal: {active_goal.goal_type.value} — {active_goal.title}.")
         if active_goal.target_calories:
             lines.append(f"Target: {active_goal.target_calories} kcal/day.")
         macro_parts = []
@@ -309,13 +334,17 @@ async def _build_user_context(user_id: uuid.UUID, session: AsyncSession, current
 
     # ── Body weight history (last 10 entries) ─────────────────────────────
     weight_rows = (
-        await session.execute(
-            select(BodyWeight)
-            .where(BodyWeight.user_id == user_id)
-            .order_by(desc(BodyWeight.logged_date))
-            .limit(10)
+        (
+            await session.execute(
+                select(BodyWeight)
+                .where(BodyWeight.user_id == user_id)
+                .order_by(desc(BodyWeight.logged_date))
+                .limit(10)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     if weight_rows:
         latest = weight_rows[0]
@@ -330,15 +359,19 @@ async def _build_user_context(user_id: uuid.UUID, session: AsyncSession, current
             )
 
     # ── Today's nutrition intake ───────────────────────────────────────────
-    today = date.today()
+    today = _today_utc()
     today_logs = (
-        await session.execute(
-            select(NutritionLog).where(
-                NutritionLog.user_id == user_id,
-                NutritionLog.logged_date == today,
+        (
+            await session.execute(
+                select(NutritionLog).where(
+                    NutritionLog.user_id == user_id,
+                    NutritionLog.logged_date == today,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     total_kcal = 0
     total_protein = 0
@@ -360,10 +393,22 @@ async def _build_user_context(user_id: uuid.UUID, session: AsyncSession, current
     coaching_tips = []
     current_hour = datetime.now().hour
     if active_goal:
-        if active_goal.target_calories and total_kcal < active_goal.target_calories * 0.3 and current_hour >= 14:
-            coaching_tips.append("User is significantly under calorie target for this time of day (missing meals?). Suggest a nutrient-dense snack.")
-        if active_goal.target_protein_g and total_protein < active_goal.target_protein_g * 0.4 and current_hour >= 16:
-            coaching_tips.append("User is behind on protein intake for the day. Recommend high-protein options.")
+        if (
+            active_goal.target_calories
+            and total_kcal < active_goal.target_calories * 0.3
+            and current_hour >= 14
+        ):
+            coaching_tips.append(
+                "User is significantly under calorie target for this time of day (missing meals?). Suggest a nutrient-dense snack."
+            )
+        if (
+            active_goal.target_protein_g
+            and total_protein < active_goal.target_protein_g * 0.4
+            and current_hour >= 16
+        ):
+            coaching_tips.append(
+                "User is behind on protein intake for the day. Recommend high-protein options."
+            )
 
     if coaching_tips:
         lines.append("\n## Proactive Coaching Triggers (Address these naturally):")
@@ -373,35 +418,42 @@ async def _build_user_context(user_id: uuid.UUID, session: AsyncSession, current
     # ── 7-day nutrition summary ────────────────────────────────────────────
     week_ago = today - timedelta(days=7)
     week_logs = (
-        await session.execute(
-            select(NutritionLog).where(
-                NutritionLog.user_id == user_id,
-                NutritionLog.logged_date >= week_ago,
-                NutritionLog.logged_date < today,
+        (
+            await session.execute(
+                select(NutritionLog).where(
+                    NutritionLog.user_id == user_id,
+                    NutritionLog.logged_date >= week_ago,
+                    NutritionLog.logged_date < today,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     if week_logs:
         daily_cals: dict[date, float] = {}
         for l in week_logs:
             daily_cals[l.logged_date] = daily_cals.get(l.logged_date, 0) + float(l.calories_kcal)
         avg_kcal = sum(daily_cals.values()) / len(daily_cals)
-        lines.append(f"Average daily calories last 7 days: {avg_kcal:.0f} kcal ({len(daily_cals)} days logged).")
+        lines.append(
+            f"Average daily calories last 7 days: {avg_kcal:.0f} kcal ({len(daily_cals)} days logged)."
+        )
 
     # ── Recent cross-session memory ─────────────────────────────────────────
     recent_advice = (
-        await session.execute(
-            select(ChatMessage.content)
-            .join(ChatSession, ChatMessage.session_id == ChatSession.id)
-            .where(
-                ChatSession.user_id == user_id,
-                ChatMessage.role == ChatRole.ASSISTANT
+        (
+            await session.execute(
+                select(ChatMessage.content)
+                .join(ChatSession, ChatMessage.session_id == ChatSession.id)
+                .where(ChatSession.user_id == user_id, ChatMessage.role == ChatRole.ASSISTANT)
+                .order_by(desc(ChatMessage.created_at))
+                .limit(3)
             )
-            .order_by(desc(ChatMessage.created_at))
-            .limit(3)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     if recent_advice:
         lines.append("\n## Recent Conversation Summary (avoid repeating exactly):")
@@ -414,7 +466,7 @@ async def _build_user_context(user_id: uuid.UUID, session: AsyncSession, current
     service = get_ai_coach_service()
     query_emb = await service.generate_embedding(current_message)
     if query_emb:
-        retriever = get_memory_retriever(use_pgvector=False) # Fallback to Python if unsure
+        retriever = get_memory_retriever(use_pgvector=False)  # Fallback to Python if unsure
         top_memories = await retriever.retrieve_top_k(session, user_id, query_emb, k=5)
 
         if top_memories:
@@ -425,13 +477,14 @@ async def _build_user_context(user_id: uuid.UUID, session: AsyncSession, current
                 # Increment usage asynchronously or quickly here
                 mem.usage_count += 1
                 mem.last_used_at = datetime.now(UTC)
-            
+
             await session.commit()
 
     return "\n".join(lines) if lines else ""
 
 
 # ── Session endpoints ─────────────────────────────────────────────────────────
+
 
 @router.get("/sessions", response_model=list[ChatSessionResponse])
 async def get_sessions(
@@ -526,27 +579,37 @@ async def get_session_messages(
     current_user: User = Depends(get_current_user),
 ):
     ownership = (
-        await session.execute(
-            select(ChatSession).where(
-                ChatSession.id == session_id,
-                ChatSession.user_id == current_user.id,
+        (
+            await session.execute(
+                select(ChatSession).where(
+                    ChatSession.id == session_id,
+                    ChatSession.user_id == current_user.id,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if not ownership:
         raise HTTPException(status_code=404, detail="Session not found")
 
     messages = (
-        await session.execute(
-            select(ChatMessage)
-            .where(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.created_at)
+        (
+            await session.execute(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == session_id)
+                .order_by(ChatMessage.created_at)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return messages
 
 
-@router.post("/sessions/{session_id}/messages/{message_id}/feedback", response_model=ChatMessageResponse)
+@router.post(
+    "/sessions/{session_id}/messages/{message_id}/feedback", response_model=ChatMessageResponse
+)
 async def submit_message_feedback(
     session_id: uuid.UUID,
     message_id: uuid.UUID,
@@ -556,24 +619,31 @@ async def submit_message_feedback(
 ):
     # Verify session ownership
     ownership = (
-        await session.execute(
-            select(ChatSession).where(
-                ChatSession.id == session_id,
-                ChatSession.user_id == current_user.id,
+        (
+            await session.execute(
+                select(ChatSession).where(
+                    ChatSession.id == session_id,
+                    ChatSession.user_id == current_user.id,
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if not ownership:
         raise HTTPException(status_code=404, detail="Session not found")
 
     msg = (
-        await session.execute(
-            select(ChatMessage).where(
-                ChatMessage.id == message_id,
-                ChatMessage.session_id == session_id
+        (
+            await session.execute(
+                select(ChatMessage).where(
+                    ChatMessage.id == message_id, ChatMessage.session_id == session_id
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
 
@@ -590,7 +660,9 @@ async def submit_message_feedback(
     await session.refresh(msg)
     return msg
 
+
 # ── Usage endpoints ───────────────────────────────────────────────────────────
+
 
 @router.get("/usage", response_model=AIUsageResponse)
 async def get_usage(
@@ -620,7 +692,7 @@ async def get_usage_history(
     current_user: User = Depends(get_current_user),
 ):
     """Return AI usage history for the requested period plus aggregate stats."""
-    today = date.today()
+    today = _today_utc()
 
     if period == "today":
         start_date = today
@@ -680,6 +752,7 @@ async def get_usage_history(
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
 
+
 @router.post("/chat")
 async def chat(
     request: Request,
@@ -698,8 +771,7 @@ async def chat(
             detail={
                 "code": "DAILY_LIMIT_REACHED",
                 "message": (
-                    "You've reached today's AI limit. "
-                    "Your quota resets automatically tomorrow."
+                    "You've reached today's AI limit. Your quota resets automatically tomorrow."
                 ),
                 "reset_at": _next_reset_utc(),
             },
@@ -745,12 +817,16 @@ async def chat(
 
     # ── Fetch conversation history (excluding the message just saved) ─────
     history_rows = (
-        await session.execute(
-            select(ChatMessage)
-            .where(ChatMessage.session_id == chat_session_id)
-            .order_by(ChatMessage.created_at)
+        (
+            await session.execute(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == chat_session_id)
+                .order_by(ChatMessage.created_at)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     history = [
         {"role": m.role.value, "content": m.content}
         for m in history_rows[:-1]  # all except the user msg we just saved
@@ -774,13 +850,15 @@ async def chat(
                     accumulated += chunk
                     yield f"data: {json.dumps({'content': chunk})}\n\n"
             except Exception as exc:
-                logger.exception("Streaming AI error")
-                yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+                logger.error("Streaming AI request failed (%s)", type(exc).__name__)
+                err_payload = {"error": "The AI service could not complete this response."}
+                yield f"data: {json.dumps(err_payload)}\n\n"
             finally:
                 elapsed_ms = int((time.perf_counter() - t_start) * 1000)
                 if accumulated:
                     try:
                         from app.db.session import db_manager
+
                         async with db_manager.session_factory() as s2:
                             ast_msg = ChatMessage(
                                 session_id=chat_session_id,
@@ -790,18 +868,30 @@ async def chat(
                             )
                             s2.add(ast_msg)
                             cs = (
-                                await s2.execute(
-                                    select(ChatSession).where(ChatSession.id == chat_session_id)
+                                (
+                                    await s2.execute(
+                                        select(ChatSession).where(ChatSession.id == chat_session_id)
+                                    )
                                 )
-                            ).scalars().first()
+                                .scalars()
+                                .first()
+                            )
                             if cs:
                                 cs.last_active_at = datetime.now(UTC)
                                 cs.updated_at = datetime.now(UTC)
                                 cs.message_count = (cs.message_count or 0) + 2  # user + assistant
                             await s2.commit()
-                            background_tasks.add_task(_extract_memory_background, current_user.id, body.message, accumulated)
+                            background_tasks.add_task(
+                                _extract_memory_background,
+                                current_user.id,
+                                body.message,
+                                accumulated,
+                            )
                     except Exception as save_exc:
-                        logger.error(f"Failed to save assistant message: {save_exc}")
+                        logger.error(
+                            "Failed to save assistant message (%s)",
+                            type(save_exc).__name__,
+                        )
                 yield "data: [DONE]\n\n"
 
         return StreamingResponse(
@@ -828,10 +918,10 @@ async def chat(
         session.add(ast_msg)
 
         cs_upd = (
-            await session.execute(
-                select(ChatSession).where(ChatSession.id == chat_session_id)
-            )
-        ).scalars().first()
+            (await session.execute(select(ChatSession).where(ChatSession.id == chat_session_id)))
+            .scalars()
+            .first()
+        )
         if cs_upd:
             cs_upd.last_active_at = now_utc
             cs_upd.updated_at = now_utc
@@ -839,7 +929,9 @@ async def chat(
 
         await session.commit()
 
-        background_tasks.add_task(_extract_memory_background, current_user.id, body.message, ai_response)
+        background_tasks.add_task(
+            _extract_memory_background, current_user.id, body.message, ai_response
+        )
 
         return {
             "success": True,
@@ -852,14 +944,14 @@ async def chat(
             },
         }
     except Exception as exc:
-        logger.exception("AI chat failed")
+        logger.error("AI chat failed (%s)", type(exc).__name__)
         return JSONResponse(
             status_code=502,
             content={
                 "success": False,
                 "error": {
                     "code": "AI_CHAT_FAILED",
-                    "message": str(exc),
+                    "message": "The AI service could not complete this response.",
                     "request_id": request_id,
                 },
             },
@@ -868,12 +960,15 @@ async def chat(
 
 # ── AI Analysis endpoints ─────────────────────────────────────────────────────
 
+
 class MealPlanRequest(BaseModel):
     days: int = 1
     calories: int | None = None
     preferences: str | None = None
 
+
 DAILY_MEAL_PLAN_LIMIT = 5
+
 
 @router.post("/image-analysis")
 async def analyze_food_image(
@@ -924,10 +1019,12 @@ async def analyze_food_image(
                     for f in result.foods
                 ],
                 "raw_response": result.raw_response,
-            }
+            },
         }
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        logger.error("Food image analysis failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=502, detail="Food image analysis could not be completed.")
+
 
 @router.post("/meal-plan")
 async def generate_meal_plan(
@@ -943,11 +1040,11 @@ async def generate_meal_plan(
                 "code": "DAILY_LIMIT_REACHED",
                 "message": "You've reached today's meal plan generation limit.",
                 "reset_at": _next_reset_utc(),
-            }
+            },
         )
 
     # Increment meal plan usage
-    today = date.today()
+    today = _today_utc()
     stmt = (
         pg_insert(AIUsageTracker)
         .values(

@@ -35,7 +35,11 @@ class AuthenticationService:
 
     async def _verify_password_via_supabase(self, email: str, password: str) -> bool:
         """Verify password against Supabase for users with sentinel hash."""
-        if self._settings is None or not self._settings.SUPABASE_URL or not self._settings.SUPABASE_SERVICE_ROLE_KEY:
+        if (
+            self._settings is None
+            or not self._settings.SUPABASE_URL
+            or not self._settings.SUPABASE_SERVICE_ROLE_KEY
+        ):
             logger.warning("Supabase credentials not configured, cannot verify password")
             return False
 
@@ -54,8 +58,8 @@ class AuthenticationService:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.post(url, headers=headers, json=data)
                 return resp.status_code == 200
-        except httpx.RequestError as e:
-            logger.error(f"Supabase password verification failed: {e}")
+        except httpx.RequestError as exc:
+            logger.error("Supabase password verification failed (%s)", type(exc).__name__)
             return False
 
     async def _initialize_user_resources(self, user_id: uuid.UUID) -> None:
@@ -110,7 +114,6 @@ class AuthenticationService:
                 # Password verified via Supabase - update local hash and allow login
                 new_hash = hash_password(request.password)
                 await self._user_repository.update_password(user.id, new_hash)
-                logger.info(f"Synced password hash for user {user.id} after Supabase verification")
             else:
                 raise OAuthAccountExistsError()
         else:
@@ -125,21 +128,34 @@ class AuthenticationService:
         self,
         supabase_email: str,
         supabase_user_id: str,
+        *,
+        email_verified: bool,
     ) -> User:
         email = supabase_email.strip().lower()
+        if not email or not email_verified:
+            raise ValueError("A verified Supabase email is required.")
         existing = await self._user_repository.get_by_email(email)
+        uid = uuid.UUID(supabase_user_id)
         if existing is not None:
+            if existing.supabase_user_id not in (None, uid):
+                raise OAuthAccountExistsError()
+            existing.supabase_user_id = uid
+            existing.is_verified = True
+            await self._user_repository._session.flush()
             return existing
 
-        try:
-            uid = uuid.UUID(supabase_user_id)
-        except ValueError:
-            uid = uuid.uuid4()
+        existing_identity = await self._user_repository.get_by_supabase_id(uid)
+        if existing_identity is not None:
+            if existing_identity.email.lower() != email:
+                raise OAuthAccountExistsError()
+            return existing_identity
 
         user = await self._user_repository.create(
             email=email,
             password_hash=SUPABASE_PASSWORD_SENTINEL,
             user_id=uid,
+            supabase_user_id=uid,
         )
+        user.is_verified = True
         await self._initialize_user_resources(user.id)
         return user
