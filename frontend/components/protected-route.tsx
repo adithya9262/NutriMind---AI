@@ -5,18 +5,17 @@ import { useRouter, usePathname } from "next/navigation"
 import { useAuth } from "@/contexts/auth-context"
 import { Spinner } from "@/components/ui/spinner"
 
-const LOADING_TIMEOUT = 10000
+const LOADING_TIMEOUT = 5000
 const REDIRECT_DELAY = 300
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { state } = useAuth()
+  const { state, refreshSession } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
   const [timedOut, setTimedOut] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const redirectingRef = useRef(false)
-
-  console.log("[ProtectedRoute] Render, state =", state)
+  const retryAttemptedRef = useRef(false)
 
   useEffect(() => {
     if (state === "loading") {
@@ -28,6 +27,19 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
     }
   }, [state])
+
+  useEffect(() => {
+    if (state === "loading" && timedOut && !retryAttemptedRef.current) {
+      retryAttemptedRef.current = true
+      refreshSession()
+        .then(() => {
+          retryAttemptedRef.current = false
+        })
+        .catch(() => {
+          retryAttemptedRef.current = false
+        })
+    }
+  }, [state, timedOut, refreshSession])
 
   useEffect(() => {
     if (state === "unauthenticated" && !redirectingRef.current) {
@@ -50,7 +62,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-screen flex-col items-center justify-center bg-background p-8">
         <h2 className="mb-2 text-xl font-semibold text-primary">Still loading...</h2>
         <p className="mb-6 text-sm text-primary-secondary">
-          Having trouble connecting. Please try refreshing the page.
+          Having trouble connecting. Retrying...
         </p>
         <button
           onClick={() => window.location.reload()}

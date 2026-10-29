@@ -79,15 +79,18 @@ export default function DashboardPage() {
   const goalsFetchedRef = useRef(false)
   const tasksFetchedRef = useRef(false)
   const weeklyFetchedRef = useRef(false)
+  const initialFetchDoneRef = useRef(false)
 
   useEffect(() => {
-    loadProfile()
-    reloadLogs()
-    reloadWeight()
-    const timer = setTimeout(() => setInitialLoad(false), 300)
-    return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (initialFetchDoneRef.current) return
+    initialFetchDoneRef.current = true
+
+    // Run independent data fetches concurrently
+    Promise.all([loadProfile(), reloadLogs(), reloadWeight()]).finally(() => {
+      const timer = setTimeout(() => setInitialLoad(false), 300)
+      return () => clearTimeout(timer)
+    })
+  }, [loadProfile, reloadLogs, reloadWeight])
 
   useEffect(() => {
     if (goalsFetchedRef.current) {
@@ -130,16 +133,24 @@ export default function DashboardPage() {
   }, [])
 
   useEffect(() => {
+    let lastVisibilityFetch = 0
+    const STALE_THRESHOLD_MS = 30000 // 30 seconds
+
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
-        loadProfile()
-        reloadLogs()
-        reloadWeight()
+        const now = Date.now()
+        // Only refetch if data is older than threshold
+        if (now - lastVisibilityFetch > STALE_THRESHOLD_MS) {
+          lastVisibilityFetch = now
+          // Only reload logs and weight which change frequently; profile is stable
+          reloadLogs()
+          reloadWeight()
+        }
       }
     }
     document.addEventListener("visibilitychange", handleVisibility)
     return () => document.removeEventListener("visibilitychange", handleVisibility)
-  }, [loadProfile, reloadLogs, reloadWeight])
+  }, [reloadLogs, reloadWeight])
 
   useEffect(() => {
     if (weeklyFetchedRef.current) {

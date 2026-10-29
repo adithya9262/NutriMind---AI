@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from functools import lru_cache
 
 from fastapi import (
     APIRouter,
@@ -45,6 +47,53 @@ router = APIRouter(prefix="/ai-coach", tags=["AI Coach"])
 
 DAILY_MESSAGE_LIMIT = 25
 DAILY_IMAGE_LIMIT = 5
+
+
+# ── Embedding cache ─────────────────────────────────────────────────────────
+# Simple in-memory LRU cache for embeddings to avoid redundant API calls.
+# Key: message text, Value: embedding vector
+# Max 512 entries, TTL handled by lru_cache maxsize (evicts oldest on overflow).
+@lru_cache(maxsize=512)
+def _cached_embedding(text: str) -> tuple[float, ...] | None:
+    """Cached embedding lookup. Returns tuple for hashability."""
+    # This is a synchronous cache; the actual async fetch happens in _get_cached_embedding
+    return None
+
+
+async def _get_cached_embedding(text: str) -> list[float] | None:
+    """Get embedding with in-memory cache to avoid redundant Gemini API calls."""
+    cached = _cached_embedding(text)
+    if cached is not None:
+        return list(cached)
+    service = get_ai_coach_service()
+    embedding = await service.generate_embedding(text)
+    if embedding:
+        # Store as tuple for lru_cache hashability
+        _cached_embedding.cache_clear()  # Clear to allow new entry with updated cache
+        # Note: lru_cache on a function with args doesn't work this way.
+        # We need a different approach. Let's use a simple dict instead.
+        pass
+    return embedding
+
+
+# Better approach: module-level dict cache
+_embedding_cache: dict[str, list[float]] = {}
+_EMBEDDING_CACHE_MAX = 512
+
+
+async def _get_cached_embedding(text: str) -> list[float] | None:
+    """Get embedding with in-memory cache to avoid redundant Gemini API calls."""
+    if text in _embedding_cache:
+        return _embedding_cache[text]
+    service = get_ai_coach_service()
+    embedding = await service.generate_embedding(text)
+    if embedding:
+        if len(_embedding_cache) >= _EMBEDDING_CACHE_MAX:
+            # Remove oldest entry (simple FIFO)
+            oldest_key = next(iter(_embedding_cache))
+            del _embedding_cache[oldest_key]
+        _embedding_cache[text] = embedding
+    return embedding
 
 
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
@@ -247,24 +296,78 @@ async def _build_user_context(
     Covers: profile biometrics, computed age, active goal + macros,
     recent body-weight trend, today's nutrition intake, allergies,
     dietary preference, and medical conditions, plus semantic memories.
+
+    Independent queries are executed concurrently using asyncio.gather.
     """
     lines: list[str] = []
-
-    # ── System Prompt & Context Layering ──────────────────────────────────
     lines.append("## Context Layers")
 
-    # ── Nutrition profile ─────────────────────────────────────────────────
-    profile: NutritionProfile | None = (
-        (await session.execute(select(NutritionProfile).where(NutritionProfile.user_id == user_id)))
-        .scalars()
-        .first()
+    # ── Fetch independent data concurrently ─────────────────────────────────
+    today = _today_utc()
+    week_ago = today - timedelta(days=7)
+
+    # Launch all independent queries concurrently
+    (
+        profile,
+        active_goal,
+        weight_rows,
+        today_logs,
+        week_logs,
+        recent_advice,
+    ) = await asyncio.gather(
+        # Nutrition profile
+        session.execute(
+            select(NutritionProfile).where(NutritionProfile.user_id == user_id)
+        ),
+        # Active goal
+        session.execute(
+            select(Goal)
+            .where(Goal.user_id == user_id, Goal.status == GoalStatus.ACTIVE)
+            .order_by(desc(Goal.created_at))
+        ),
+        # Body weight history (last 10)
+        session.execute(
+            select(BodyWeight)
+            .where(BodyWeight.user_id == user_id)
+            .order_by(desc(BodyWeight.logged_date))
+            .limit(10)
+        ),
+        # Today's nutrition logs
+        session.execute(
+            select(NutritionLog).where(
+                NutritionLog.user_id == user_id,
+                NutritionLog.logged_date == today,
+            )
+        ),
+        # 7-day nutrition logs
+        session.execute(
+            select(NutritionLog).where(
+                NutritionLog.user_id == user_id,
+                NutritionLog.logged_date >= week_ago,
+                NutritionLog.logged_date < today,
+            )
+        ),
+        # Recent assistant messages
+        session.execute(
+            select(ChatMessage.content)
+            .join(ChatSession, ChatMessage.session_id == ChatSession.id)
+            .where(ChatSession.user_id == user_id, ChatMessage.role == ChatRole.ASSISTANT)
+            .order_by(desc(ChatMessage.created_at))
+            .limit(3)
+        ),
     )
 
+    profile = profile.scalars().first()
+    active_goal = active_goal.scalars().first()
+    weight_rows = weight_rows.scalars().all()
+    today_logs = today_logs.scalars().all()
+    week_logs = week_logs.scalars().all()
+    recent_advice = recent_advice.scalars().all()
+
+    # ── Nutrition profile ─────────────────────────────────────────────────
     if profile:
-        # Compute age from date_of_birth
         age_str = "unknown"
         if profile.date_of_birth:
-            today = _today_utc()
             age = (
                 today.year
                 - profile.date_of_birth.year
@@ -301,21 +404,6 @@ async def _build_user_context(
             lines.append(f"Daily water goal: {profile.water_goal_ml} ml.")
 
     # ── Active goal ────────────────────────────────────────────────────────
-    active_goal: Goal | None = (
-        (
-            await session.execute(
-                select(Goal)
-                .where(
-                    Goal.user_id == user_id,
-                    Goal.status == GoalStatus.ACTIVE,
-                )
-                .order_by(desc(Goal.created_at))
-            )
-        )
-        .scalars()
-        .first()
-    )
-
     if active_goal:
         lines.append(f"Active goal: {active_goal.goal_type.value} — {active_goal.title}.")
         if active_goal.target_calories:
@@ -333,19 +421,6 @@ async def _build_user_context(
             lines.append(f"Goal deadline: {active_goal.end_date}.")
 
     # ── Body weight history (last 10 entries) ─────────────────────────────
-    weight_rows = (
-        (
-            await session.execute(
-                select(BodyWeight)
-                .where(BodyWeight.user_id == user_id)
-                .order_by(desc(BodyWeight.logged_date))
-                .limit(10)
-            )
-        )
-        .scalars()
-        .all()
-    )
-
     if weight_rows:
         latest = weight_rows[0]
         lines.append(f"Latest recorded weight: {latest.weight_kg} kg on {latest.logged_date}.")
@@ -359,20 +434,6 @@ async def _build_user_context(
             )
 
     # ── Today's nutrition intake ───────────────────────────────────────────
-    today = _today_utc()
-    today_logs = (
-        (
-            await session.execute(
-                select(NutritionLog).where(
-                    NutritionLog.user_id == user_id,
-                    NutritionLog.logged_date == today,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-
     total_kcal = 0
     total_protein = 0
     if today_logs:
@@ -416,21 +477,6 @@ async def _build_user_context(
             lines.append(f"- {tip}")
 
     # ── 7-day nutrition summary ────────────────────────────────────────────
-    week_ago = today - timedelta(days=7)
-    week_logs = (
-        (
-            await session.execute(
-                select(NutritionLog).where(
-                    NutritionLog.user_id == user_id,
-                    NutritionLog.logged_date >= week_ago,
-                    NutritionLog.logged_date < today,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-
     if week_logs:
         daily_cals: dict[date, float] = {}
         for l in week_logs:
@@ -441,43 +487,23 @@ async def _build_user_context(
         )
 
     # ── Recent cross-session memory ─────────────────────────────────────────
-    recent_advice = (
-        (
-            await session.execute(
-                select(ChatMessage.content)
-                .join(ChatSession, ChatMessage.session_id == ChatSession.id)
-                .where(ChatSession.user_id == user_id, ChatMessage.role == ChatRole.ASSISTANT)
-                .order_by(desc(ChatMessage.created_at))
-                .limit(3)
-            )
-        )
-        .scalars()
-        .all()
-    )
-
     if recent_advice:
         lines.append("\n## Recent Conversation Summary (avoid repeating exactly):")
-        for idx, advice in enumerate(recent_advice):
-            # truncate to 150 chars to save tokens
+        for advice in recent_advice:
             lines.append(f"- {advice[:150]}...")
 
-    # ── Top Semantic Memories ────────────────────────────────────────────────
-    settings = get_settings()
-    service = get_ai_coach_service()
-    query_emb = await service.generate_embedding(current_message)
+    # ── Top Semantic Memories (with embedding cache) ────────────────────────
+    query_emb = await _get_cached_embedding(current_message)
     if query_emb:
-        retriever = get_memory_retriever(use_pgvector=False)  # Fallback to Python if unsure
+        retriever = get_memory_retriever(use_pgvector=False)
         top_memories = await retriever.retrieve_top_k(session, user_id, query_emb, k=5)
 
         if top_memories:
             lines.append("\n## Top Semantic Memories (User Facts):")
             for mem in top_memories:
                 lines.append(f"- {mem.content} (Confidence: {mem.confidence:.1f})")
-
-                # Increment usage asynchronously or quickly here
                 mem.usage_count += 1
                 mem.last_used_at = datetime.now(UTC)
-
             await session.commit()
 
     return "\n".join(lines) if lines else ""

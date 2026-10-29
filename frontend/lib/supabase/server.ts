@@ -2,16 +2,7 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import type { NextResponse } from "next/server"
 import { supabaseCookieOptions } from "./cookie-options"
-
-function getSupabaseCredentials() {
-  const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const envKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  const hasValidPair = Boolean(envUrl && envKey && envUrl.trim() !== "" && envKey.trim() !== "")
-  return {
-    url: hasValidPair ? envUrl! : "https://placeholder.supabase.co",
-    key: hasValidPair ? envKey! : "placeholder-anon-key",
-  }
-}
+import { getSupabaseCredentials } from "./credentials"
 
 export async function createClient() {
   const cookieStore = await cookies()

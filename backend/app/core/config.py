@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     OPENFOODFACTS_BASE_URL: str = "https://world.openfoodfacts.org/api/v2"
     OPENFOODFACTS_USER_AGENT: str = "NutriMindAI/1.0"
 
+    # Database connection pool settings
+    DATABASE_POOL_SIZE: int = Field(default=20, ge=1, le=100)
+    DATABASE_MAX_OVERFLOW: int = Field(default=10, ge=0, le=50)
+    DATABASE_POOL_TIMEOUT: int = Field(default=10, ge=1, le=60)
+
     @property
     def cors_origins_list(self) -> list[str]:
         seen: set[str] = set()
