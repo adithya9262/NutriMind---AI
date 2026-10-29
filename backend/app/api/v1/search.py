@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -16,6 +17,9 @@ from app.services.food_search import FoodSearchService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/search", tags=["Search"])
+
+# Timeout for external nutrition database search (must be less than frontend timeout)
+EXTERNAL_SEARCH_TIMEOUT = 5.0
 
 
 @router.get("")
@@ -50,7 +54,11 @@ async def global_search(
     try:
         settings = Settings()
         food_search_service = FoodSearchService(usda_api_key=settings.USDA_API_KEY)
-        food_search_result = await food_search_service.search(q, max_results=10)
+        # Use asyncio.wait_for to enforce a timeout on the external search
+        food_search_result = await asyncio.wait_for(
+            food_search_service.search(q, max_results=10),
+            timeout=EXTERNAL_SEARCH_TIMEOUT,
+        )
         for food in food_search_result.foods:
             # Add source indicator to distinguish external suggestions from personal logs
             results["foods"].append({
@@ -62,6 +70,8 @@ async def global_search(
                 "source": food.source,  # "usda" or "open_food_facts"
                 "is_suggestion": True,
             })
+    except asyncio.TimeoutError:
+        logger.warning("External nutrition database search timed out after %ss", EXTERNAL_SEARCH_TIMEOUT)
     except Exception:
         logger.exception("External nutrition database search failed")
 

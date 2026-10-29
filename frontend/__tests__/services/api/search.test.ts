@@ -203,5 +203,97 @@ describe("Search API", () => {
       expect(result.success).toBe(true);
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
+
+    it("handles external search timeout gracefully - returns personal results when external suggestions timeout", async () => {
+      // Simulate backend returning personal foods + tasks but external suggestions timed out
+      // The backend would still return success with personal foods and tasks, just no external suggestions
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              success: true,
+              message: "Search completed.",
+              data: {
+                foods: [
+                  {
+                    id: "1",
+                    food_name: "Personal Apple Log",
+                    meal_type: "snack",
+                    logged_date: "2024-01-15",
+                    calories_kcal: "95",
+                    source: undefined,
+                    is_suggestion: false,
+                  },
+                ],
+                tasks: [],
+              },
+            })
+          ),
+      });
+
+      const { globalSearch } = await getSearchApi();
+      const result = await globalSearch("apple");
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.foods).toHaveLength(1);
+        expect(result.data.foods[0].food_name).toBe("Personal Apple Log");
+        expect(result.data.foods[0].is_suggestion).toBe(false);
+      }
+    });
+
+    it("returns external food suggestions when external search succeeds", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              success: true,
+              message: "Search completed.",
+              data: {
+                foods: [
+                  {
+                    id: "ext-12345",
+                    food_name: "Apple, raw",
+                    meal_type: null,
+                    logged_date: null,
+                    calories_kcal: "52",
+                    source: "usda",
+                    is_suggestion: true,
+                  },
+                  {
+                    id: "ext-67890",
+                    food_name: "Banana, raw",
+                    meal_type: null,
+                    logged_date: null,
+                    calories_kcal: "89",
+                    source: "open_food_facts",
+                    is_suggestion: true,
+                  },
+                ],
+                tasks: [],
+              },
+            })
+          ),
+      });
+
+      const { globalSearch } = await getSearchApi();
+      const result = await globalSearch("apple");
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.foods).toHaveLength(2);
+        expect(result.data.foods[0].food_name).toBe("Apple, raw");
+        expect(result.data.foods[0].is_suggestion).toBe(true);
+        expect(result.data.foods[0].source).toBe("usda");
+        expect(result.data.foods[1].food_name).toBe("Banana, raw");
+        expect(result.data.foods[1].source).toBe("open_food_facts");
+      }
+    });
   });
 });

@@ -12,7 +12,7 @@ USDA_API_URL = "https://api.nal.usda.gov/fdc/v1/foods/search"
 OPENFOODFACTS_API_URL = "https://world.openfoodfacts.org/cgi/search.pl"
 
 # External API timeouts (should be less than frontend timeout / 2 to allow for both APIs)
-EXTERNAL_API_TIMEOUT = 8.0
+EXTERNAL_API_TIMEOUT = 3.0
 
 logger = logging.getLogger(__name__)
 
