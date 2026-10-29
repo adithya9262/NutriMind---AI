@@ -7,10 +7,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies.authentication import get_current_user
+from app.core.config import Settings
 from app.db.dependencies import get_db_session
 from app.models.nutrition_log import NutritionLog
 from app.models.task import Task
 from app.models.user import User
+from app.services.food_search import FoodSearchService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/search", tags=["Search"])
@@ -26,6 +28,7 @@ async def global_search(
     query = f"%{q}%"
     results = {"foods": [], "tasks": []}
 
+    # 1. Search personal nutrition logs
     try:
         stmt = select(NutritionLog).where(
             NutritionLog.user_id == current_user.id,
@@ -41,8 +44,28 @@ async def global_search(
                 "calories_kcal": str(log.calories_kcal),
             })
     except Exception:
-        logger.exception("Food search failed")
+        logger.exception("Personal food log search failed")
 
+    # 2. Search external nutrition database (USDA/OpenFoodFacts) for food suggestions
+    try:
+        settings = Settings()
+        food_search_service = FoodSearchService(usda_api_key=settings.USDA_API_KEY)
+        food_search_result = await food_search_service.search(q, max_results=10)
+        for food in food_search_result.foods:
+            # Add source indicator to distinguish external suggestions from personal logs
+            results["foods"].append({
+                "id": f"ext-{food.fdc_id}",
+                "food_name": food.food_name,
+                "meal_type": None,  # Not a logged meal
+                "logged_date": None,
+                "calories_kcal": str(food.calories_kcal),
+                "source": food.source,  # "usda" or "open_food_facts"
+                "is_suggestion": True,
+            })
+    except Exception:
+        logger.exception("External nutrition database search failed")
+
+    # 3. Search tasks
     try:
         stmt = select(Task).where(
             Task.user_id == current_user.id,

@@ -1,11 +1,11 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
-import { Search, Loader2, AlertCircle } from "lucide-react"
+import { Search, Loader2, AlertCircle, Database, Leaf } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { globalSearch } from "@/services/api/search"
 import { cn } from "@/lib/utils"
-import type { SearchResult } from "@/types/search"
+import type { SearchResult, SearchFood } from "@/types/search"
 
 export function GlobalSearch() {
   const [query, setQuery] = useState("")
@@ -60,9 +60,12 @@ export function GlobalSearch() {
     }
   }, [query, performSearch])
 
-  const resultCount = results
-    ? (results.foods?.length || 0) + (results.tasks?.length || 0)
-    : 0
+  // Separate personal logs from external suggestions
+  const personalFoods = results?.foods?.filter((f: SearchFood) => !f.is_suggestion) ?? []
+  const suggestedFoods = results?.foods?.filter((f: SearchFood) => f.is_suggestion) ?? []
+  const tasks = results?.tasks ?? []
+
+  const resultCount = (personalFoods.length + suggestedFoods.length + tasks.length)
 
   return (
     <div className="relative max-w-md">
@@ -97,14 +100,16 @@ export function GlobalSearch() {
       </div>
       {open && results && resultCount > 0 && (
         <div className="absolute z-50 mt-1 w-full rounded-xl border border-border bg-surface shadow-lg">
-          {results.foods?.length > 0 && (
+          {/* Personal logged meals */}
+          {personalFoods.length > 0 && (
             <div className="p-2">
-              <p className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-primary-muted">
-                Meals
-              </p>
-              {results.foods.slice(0, 5).map((food, i) => (
+              <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-primary-muted">
+                <Database className="h-3 w-3" aria-hidden="true" />
+                <span>Your Meals</span>
+              </div>
+              {personalFoods.slice(0, 5).map((food, i) => (
                 <div
-                  key={`food-${i}`}
+                  key={`personal-food-${i}`}
                   className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-surface-high"
                 >
                   <span className="text-primary">{food.food_name}</span>
@@ -113,12 +118,37 @@ export function GlobalSearch() {
               ))}
             </div>
           )}
-          {results.tasks?.length > 0 && (
+          {/* External nutrition database suggestions */}
+          {suggestedFoods.length > 0 && (
+            <div className={cn("p-2", personalFoods.length > 0 && "border-t border-border")}>
+              <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-primary-muted">
+                <Leaf className="h-3 w-3" aria-hidden="true" />
+                <span>Food Suggestions</span>
+              </div>
+              {suggestedFoods.slice(0, 5).map((food, i) => (
+                <div
+                  key={`suggestion-food-${i}`}
+                  className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-surface-high"
+                >
+                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                    <span className="text-primary truncate">{food.food_name}</span>
+                    {food.source && (
+                      <span className="shrink-0 text-[10px] uppercase tracking-wider text-primary-muted/50 border border-border rounded-full px-1.5 py-0.5">
+                        {food.source === "usda" ? "USDA" : "OFF"}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-primary-muted">{food.calories_kcal} kcal</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {tasks.length > 0 && (
             <div className="border-t border-border p-2">
               <p className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-primary-muted">
                 Tasks
               </p>
-              {results.tasks.slice(0, 5).map((task, i) => (
+              {tasks.slice(0, 5).map((task, i) => (
                 <div
                   key={`task-${i}`}
                   className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-surface-high"
