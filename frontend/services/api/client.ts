@@ -43,7 +43,10 @@ function isRetryableError(status: number, method: string, retryable: boolean): b
 }
 
 function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
+  if (error instanceof Error && error.name === "AbortError") return true;
+  // Also handle DOMException (thrown by fetch when AbortSignal aborts)
+  if (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError") return true;
+  return false;
 }
 
 function parseRetryAfter(header: string | null): number | null {
@@ -101,10 +104,12 @@ async function doFetchWithRetry<T>(
   controller: AbortController,
   timeoutId: ReturnType<typeof setTimeout>,
   maxRetries: number,
-  retryable: boolean
+  retryable: boolean,
+  parentSignal?: AbortSignal
 ): Promise<ApiResponse<T>> {
   let attempt = 0;
-  let lastError: ApiResponse<T> | null = null;
+  let currentController = controller;
+  let currentTimeoutId = timeoutId;
 
   while (true) {
     try {
@@ -113,7 +118,7 @@ async function doFetchWithRetry<T>(
       const fetchOptions: RequestInit = {
         method,
         headers: requestHeaders,
-        signal: controller.signal,
+        signal: currentController.signal,
         cache: "no-store",
       };
 
@@ -122,7 +127,7 @@ async function doFetchWithRetry<T>(
       }
 
       const response = await fetch(url, fetchOptions);
-      clearTimeout(timeoutId);
+      clearTimeout(currentTimeoutId);
 
       if (!response.ok) {
         if (response.status === 401 && useToken) {
@@ -172,17 +177,13 @@ async function doFetchWithRetry<T>(
           const retryAfter = parseRetryAfter(response.headers.get("Retry-After"));
           const delay = retryAfter ?? BASE_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
           await sleep(delay);
-          // Create new timeout signal for retry
+          // Create fresh controller and timeout for retry, preserving original parent signal
           const { controller: newController, timeoutId: newTimeoutId } = createTimeoutSignal(
-            timeoutId ? 8000 : 8000, // default timeout
-            controller.signal
+            8000,
+            parentSignal
           );
-          // We can't easily reuse the old controller, so we'll just continue
-          // The outer loop will create a new controller
-          // Actually, we need to create a fresh controller for the next attempt
-          // Let's just continue and the outer function will handle it
-          // For now, we'll just continue with the same controller (which may be aborted)
-          // A cleaner approach would be to restructure, but this works for bounded retries
+          currentController = newController;
+          currentTimeoutId = newTimeoutId;
           continue;
         }
 
@@ -212,7 +213,7 @@ async function doFetchWithRetry<T>(
 
       return parsed as ApiResponse<T>;
     } catch (error) {
-      clearTimeout(timeoutId);
+      clearTimeout(currentTimeoutId);
       if (isAbortError(error)) {
         if (method !== "GET") {
           import("sonner").then(({ toast }) =>
@@ -237,6 +238,13 @@ async function doFetchWithRetry<T>(
           attempt++;
           const delay = BASE_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
           await sleep(delay);
+          // Create fresh controller and timeout for retry, preserving original parent signal
+          const { controller: newController, timeoutId: newTimeoutId } = createTimeoutSignal(
+            8000,
+            parentSignal
+          );
+          currentController = newController;
+          currentTimeoutId = newTimeoutId;
           continue;
         }
 
@@ -314,7 +322,8 @@ async function request<T>(
     controller,
     timeoutId,
     maxRetries,
-    retryable
+    retryable,
+    options.signal
   ).finally(() => {
     inflightRequests.delete(requestKey);
   });
