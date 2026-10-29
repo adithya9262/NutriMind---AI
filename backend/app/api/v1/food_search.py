@@ -58,13 +58,21 @@ async def search_foods(
         }
     except Exception as exc:
         logger.exception("Food search failed")
+        error_msg = str(exc)
+        # Provide more helpful error messages for common external API failures
+        if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+            error_msg = "External nutrition service timed out. Please try again later."
+        elif "503" in error_msg or "502" in error_msg or "rate limit" in error_msg.lower():
+            error_msg = "External nutrition service temporarily unavailable. Please try again later."
+        elif "network" in error_msg.lower() or "connection" in error_msg.lower():
+            error_msg = "Unable to reach external nutrition service. Please check your connection."
         return JSONResponse(
             status_code=502,
             content={
                 "success": False,
                 "error": {
                     "code": "FOOD_SEARCH_FAILED",
-                    "message": f"Food search failed: {exc}",
+                    "message": error_msg,
                     "request_id": request_id,
                 },
             },

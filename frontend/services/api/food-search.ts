@@ -1,6 +1,8 @@
 import { apiGet } from "./client";
 
 export async function searchFoodsApi(query: string, maxResults: number = 25) {
+  // Use longer timeout (25s) to account for external API calls (USDA + OpenFoodFacts)
+  // Disable retries since retries on timeout would multiply slow external API requests
   return apiGet<{
     query: string;
     total_results: number;
@@ -19,6 +21,7 @@ export async function searchFoodsApi(query: string, maxResults: number = 25) {
       source: string;
     }[];
   }>(
-    `/food-search/search?query=${encodeURIComponent(query)}&max_results=${maxResults}`
+    `/food-search/search?query=${encodeURIComponent(query)}&max_results=${maxResults}`,
+    { timeout: 25000, retryable: false }
   );
 }

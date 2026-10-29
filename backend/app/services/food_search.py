@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -9,6 +10,11 @@ import httpx
 
 USDA_API_URL = "https://api.nal.usda.gov/fdc/v1/foods/search"
 OPENFOODFACTS_API_URL = "https://world.openfoodfacts.org/cgi/search.pl"
+
+# External API timeouts (should be less than frontend timeout / 2 to allow for both APIs)
+EXTERNAL_API_TIMEOUT = 8.0
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,20 +77,36 @@ class FoodSearchService:
         if cached:
             return cached
 
+        # Try USDA first if API key is available
         if self._usda_api_key:
             try:
                 result = await self._search_usda(query, max_results)
                 _cache.set(cache_key, result)
                 return result
+            except httpx.TimeoutException:
+                logger.warning("USDA API timeout, falling back to OpenFoodFacts")
+            except httpx.HTTPStatusError as exc:
+                logger.warning("USDA API HTTP error %s, falling back to OpenFoodFacts", exc.response.status_code)
             except Exception:
-                pass
+                logger.exception("USDA API error, falling back to OpenFoodFacts")
 
-        result = await self._search_openfoodfacts(query, max_results)
-        _cache.set(cache_key, result)
-        return result
+        # Fallback to OpenFoodFacts
+        try:
+            result = await self._search_openfoodfacts(query, max_results)
+            _cache.set(cache_key, result)
+            return result
+        except httpx.TimeoutException:
+            raise Exception("External nutrition service timed out")
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code >= 500:
+                raise Exception(f"External nutrition service unavailable (HTTP {exc.response.status_code})")
+            raise Exception(f"External nutrition service error (HTTP {exc.response.status_code})")
+        except Exception:
+            logger.exception("OpenFoodFacts API error")
+            raise Exception("External nutrition service error")
 
     async def _search_usda(self, query: str, max_results: int) -> FoodSearchResult:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=EXTERNAL_API_TIMEOUT) as client:
             resp = await client.get(
                 USDA_API_URL,
                 params={"api_key": self._usda_api_key, "query": query, "pageSize": max_results, "dataType": "Foundation,SR Legacy"},
@@ -119,7 +141,7 @@ class FoodSearchService:
         return FoodSearchResult(query=query, total_results=len(foods), foods=tuple(foods), source="usda")
 
     async def _search_openfoodfacts(self, query: str, max_results: int) -> FoodSearchResult:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=EXTERNAL_API_TIMEOUT) as client:
             resp = await client.get(
                 OPENFOODFACTS_API_URL,
                 params={"search_terms": query, "page_size": max_results, "json": 1},
